@@ -34,7 +34,7 @@ func main() {
 				return err
 			}
 			select {
-			case _ = <-exit:
+			case <-exit:
 				return nil
 			case err := <-s.Serve():
 				return err
