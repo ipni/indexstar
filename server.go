@@ -57,7 +57,6 @@ func NewServer(c *cli.Context) (*server, error) {
 
 func (s *server) Serve() chan error {
 	ec := make(chan error)
-	defer close(ec)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/multihash/", s.find)
@@ -73,14 +72,16 @@ func (s *server) Serve() chan error {
 			ec <- e
 		}
 	}()
-	select {
-	case <-s.Context.Done():
+	go func() {
+		defer close(ec)
+
+		<-s.Context.Done()
 		err := serv.Shutdown(s.Context)
 		if err != nil {
 			log.Warnw("failed shutdown", "err", err)
 			ec <- err
 		}
-	}
+	}()
 	return ec
 }
 
