@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 
@@ -42,9 +43,18 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 		surls = append(surls, surl)
 	}
+
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 100
+	t.MaxConnsPerHost = 100
+	t.MaxIdleConnsPerHost = 100
+
 	s := server{
-		Context:  c.Context,
-		Client:   http.Client{},
+		Context: c.Context,
+		Client: http.Client{
+			Timeout:   10 * time.Second,
+			Transport: t,
+		},
 		Listener: bound,
 		servers:  surls,
 		base:     httputil.NewSingleHostReverseProxy(surls[0]),

@@ -55,12 +55,12 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			defer resp.Body.Close()
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				log.Warnw("failed backend read", "err", err)
+				return
+			}
 			if resp.StatusCode == http.StatusOK {
-				data, err := io.ReadAll(resp.Body)
-				if err != nil {
-					log.Warnw("failed backend read", "err", err)
-					return
-				}
 				providers, err := model.UnmarshalFindResponse(data)
 				if err == nil {
 					combined <- providers
