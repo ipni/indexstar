@@ -13,6 +13,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const maxRequestBodySize = 8 << 10 // 8KiB
+
 var log = logging.Logger("indexstar/mux")
 
 type server struct {
@@ -54,6 +56,8 @@ func (s *server) Serve() chan error {
 	ec := make(chan error)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/cid/", s.find)
+	mux.HandleFunc("/multihash", s.find)
 	mux.HandleFunc("/multihash/", s.find)
 	reframe, err := NewReframeHTTPHandler(s.servers)
 	if err != nil {
@@ -65,7 +69,7 @@ func (s *server) Serve() chan error {
 	mux.Handle("/", s)
 
 	serv := http.Server{
-		Handler: mux,
+		Handler: http.MaxBytesHandler(mux, maxRequestBodySize),
 	}
 	go func() {
 		log.Infow("finder http server listening", "listen_addr", s.Listener.Addr())
