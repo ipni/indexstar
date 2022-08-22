@@ -92,5 +92,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Host = s.servers[0].Host
 	r.URL.Scheme = s.servers[0].Scheme
 	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
+	r.Header.Set("Host", s.servers[0].Host)
 	s.base.ServeHTTP(w, r)
 }

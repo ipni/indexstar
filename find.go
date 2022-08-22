@@ -21,7 +21,6 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			r.URL.Host = server.Host
 			r.URL.Scheme = server.Scheme
-			r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
 			resp, err := s.Client.Get(r.URL.String())
 			if err != nil {
 				log.Warnw("failed query", "backend", r.URL, "err", err)
