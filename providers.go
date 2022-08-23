@@ -6,20 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-	"time"
 
+	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/filecoin-shipyard/indexstar/httpserver"
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-type Announce struct {
-	AddrInfo              peer.AddrInfo
-	LastAdvertisement     json.RawMessage
-	LastAdvertisementTime time.Time
-}
-
 func (s *server) providers(w http.ResponseWriter, r *http.Request) {
-	combined := make(chan []Announce)
+	combined := make(chan []model.ProviderInfo)
 	wg := sync.WaitGroup{}
 	var err error
 	_, err = io.ReadAll(r.Body)
@@ -55,7 +49,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 			}
 			defer resp.Body.Close()
 			dec := json.NewDecoder(resp.Body)
-			providers := []Announce{}
+			var providers []model.ProviderInfo
 			err = dec.Decode(&providers)
 			if err != nil {
 				log.Warnw("failed backend read", "err", err)
@@ -73,11 +67,11 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 		close(combined)
 	}()
 
-	resp := make(map[peer.ID]Announce)
+	resp := make(map[peer.ID]model.ProviderInfo)
 
 	for prov := range combined {
 		for _, p := range prov {
-			if _, ok := resp[p.AddrInfo.ID]; !ok {
+			if _, ok := resp[p.AddrInfo.ID]; ok {
 				continue
 			}
 			resp[p.AddrInfo.ID] = p
@@ -90,7 +84,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// write out combined.
-	out := make([]Announce, 0, len(resp))
+	out := make([]model.ProviderInfo, 0, len(resp))
 	for _, a := range resp {
 		out = append(out, a)
 	}
