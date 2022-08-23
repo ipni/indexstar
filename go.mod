@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/filecoin-project/storetheindex v0.4.20
 	github.com/ipfs/go-cid v0.2.0
-	github.com/ipfs/go-delegated-routing v0.2.2
+	github.com/ipfs/go-delegated-routing v0.3.0
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p-core v0.16.1
 	github.com/urfave/cli/v2 v2.11.1
@@ -21,7 +21,7 @@ require (
 	github.com/ipfs/go-ipfs-util v0.0.2 // indirect
 	github.com/ipfs/go-ipns v0.1.2 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
-	github.com/ipld/edelweiss v0.1.2 // indirect
+	github.com/ipld/edelweiss v0.1.4 // indirect
 	github.com/ipld/go-ipld-prime v0.17.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/libp2p/go-buffer-pool v0.0.2 // indirect
