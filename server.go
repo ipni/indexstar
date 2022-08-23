@@ -76,7 +76,7 @@ func (s *server) Serve() chan error {
 		close(ec)
 		return ec
 	}
-	mux.HandleFunc("/reframe/", reframe)
+	mux.HandleFunc("/reframe", reframe)
 	mux.Handle("/", s)
 
 	serv := http.Server{
