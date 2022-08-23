@@ -1,6 +1,6 @@
 module github.com/filecoin-shipyard/indexstar
 
-go 1.18
+go 1.19
 
 require (
 	github.com/filecoin-project/storetheindex v0.4.20

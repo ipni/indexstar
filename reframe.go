@@ -35,8 +35,7 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 
 	clients := make([]drclient.DelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
-		b.Path += "/reframe"
-		endpoint := b.String()
+		endpoint := b.JoinPath("reframe").String()
 		q, err := drproto.New_DelegatedRouting_Client(endpoint, drproto.DelegatedRouting_Client_WithHTTPClient(&httpClient))
 		if err != nil {
 			return nil, err
