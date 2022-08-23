@@ -69,6 +69,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/cid/", s.find)
 	mux.HandleFunc("/multihash", s.find)
 	mux.HandleFunc("/multihash/", s.find)
+	mux.HandleFunc("/providers", s.providers)
 	reframe, err := NewReframeHTTPHandler(s.servers)
 	if err != nil {
 		ec <- err
