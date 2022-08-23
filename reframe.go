@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
@@ -22,7 +23,16 @@ func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
 }
 
 func NewReframeService(backends []*url.URL) (*ReframeService, error) {
-	httpClient := http.Client{}
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 100
+	t.MaxConnsPerHost = 100
+	t.MaxIdleConnsPerHost = 100
+
+	httpClient := http.Client{
+		Timeout:   10 * time.Second,
+		Transport: t,
+	}
+
 	clients := make([]drclient.DelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
 		b.Path += "/reframe"
