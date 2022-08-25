@@ -29,7 +29,7 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	t.MaxIdleConnsPerHost = 100
 
 	httpClient := http.Client{
-		Timeout:   10 * time.Second,
+		Timeout:   5 * time.Second,
 		Transport: t,
 	}
 
@@ -64,8 +64,16 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for r := range childout {
-				out <- r
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case r, ok := <-childout:
+					if !ok {
+						return
+					}
+					out <- r
+				}
 			}
 		}()
 	}
@@ -80,10 +88,10 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 	return out, nil
 }
 
-func (x *ReframeService) GetIPNS(ctx context.Context, id []byte) (<-chan drclient.GetIPNSAsyncResult, error) {
+func (x *ReframeService) GetIPNS(_ context.Context, _ []byte) (<-chan drclient.GetIPNSAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }
 
-func (x *ReframeService) PutIPNS(ctx context.Context, id []byte, record []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
+func (x *ReframeService) PutIPNS(_ context.Context, _ []byte, _ []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }
