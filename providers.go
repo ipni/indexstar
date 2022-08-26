@@ -68,7 +68,6 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	resp := make(map[peer.ID]model.ProviderInfo)
-
 	for prov := range combined {
 		for _, p := range prov {
 			if _, ok := resp[p.AddrInfo.ID]; ok {
@@ -78,12 +77,9 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if resp == nil {
-		http.Error(w, "no results for query", http.StatusNotFound)
-		return
-	}
-
-	// write out combined.
+	// Write out combined.
+	// Note that /providers never returns 404. Instead, when there are no providers,
+	// an empty JSON array is returned.
 	out := make([]model.ProviderInfo, 0, len(resp))
 	for _, a := range resp {
 		out = append(out, a)
