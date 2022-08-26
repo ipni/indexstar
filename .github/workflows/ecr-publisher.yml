@@ -10,6 +10,7 @@ on:
       - 'docs/**'
     branches:
       - main
+      - masih/timeout-cap-experiment  # TODO: Remove; for testing only
 
 jobs:
   publisher:

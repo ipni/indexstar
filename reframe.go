@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -33,58 +33,100 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 		Transport: t,
 	}
 
-	clients := make([]drclient.DelegatedRoutingClient, 0, len(backends))
+	clients := make([]backendDelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
 		endpoint := b.JoinPath("reframe").String()
 		q, err := drproto.New_DelegatedRouting_Client(endpoint, drproto.DelegatedRouting_Client_WithHTTPClient(&httpClient))
 		if err != nil {
 			return nil, err
 		}
-		clients = append(clients, drclient.NewClient(q))
+		clients = append(clients, backendDelegatedRoutingClient{
+			DelegatedRoutingClient: drclient.NewClient(q),
+			url:                    b,
+		})
 	}
 	return &ReframeService{clients}, nil
 }
 
 type ReframeService struct {
-	backends []drclient.DelegatedRoutingClient
+	backends []backendDelegatedRoutingClient
+}
+
+type backendDelegatedRoutingClient struct {
+	drclient.DelegatedRoutingClient
+	url *url.URL
 }
 
 func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
-	out := make(chan drclient.FindProvidersAsyncResult)
-	wg := sync.WaitGroup{}
-	var lastErr error
-	n := 0
-	for _, c := range x.backends {
-		childout, err := c.FindProvidersAsync(ctx, key)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		n++
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case r, ok := <-childout:
-					if !ok {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	out := make(chan drclient.FindProvidersAsyncResult, 1)
+	cout := make(chan drclient.FindProvidersAsyncResult, 1)
+
+	go func() {
+		for _, b := range x.backends {
+			bout, err := b.FindProvidersAsync(ctx, key)
+			if err != nil {
+				log.Errorw("failed to instantiate asyc find on backend", "url", b.url, "err", err)
+				continue
+			}
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
 						return
+					case r, ok := <-bout:
+						if !ok {
+							return
+						}
+						cout <- r
 					}
-					out <- r
+				}
+			}()
+		}
+	}()
+
+	go func() {
+		defer close(out)
+		defer close(cout)
+		defer cancel()
+
+		pids := make(map[peer.ID]struct{})
+		var rerr error
+		for {
+			select {
+			case <-ctx.Done():
+				if len(pids) == 0 {
+					var result drclient.FindProvidersAsyncResult
+					if rerr != nil {
+						log.Warnw("no providers found in time, with error", "err", rerr, "key", key)
+						result.Err = rerr
+					}
+					out <- result
+				}
+				return
+			case r := <-cout:
+				if r.Err != nil {
+					rerr = r.Err
+				} else {
+					var result drclient.FindProvidersAsyncResult
+					for _, ai := range r.AddrInfo {
+						// TODO: Improve heuristic of picking which addrinfo to return by
+						//       picking the most recently seen provider instead of first
+						//       found.
+						if _, seen := pids[ai.ID]; seen {
+							continue
+						}
+						pids[ai.ID] = struct{}{}
+						result.AddrInfo = append(result.AddrInfo, ai)
+					}
+					if len(result.AddrInfo) > 0 {
+						out <- result
+					}
 				}
 			}
-		}()
-	}
-	if n == 0 {
-		close(out)
-		return nil, lastErr
-	}
-	go func() {
-		wg.Wait()
-		close(out)
+		}
 	}()
+
 	return out, nil
 }
 
