@@ -26,20 +26,20 @@ func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
 
 func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 100
-	t.MaxConnsPerHost = 100
-	t.MaxIdleConnsPerHost = 100
+	t.MaxIdleConns = config.Reframe.MaxIdleConns
+	t.MaxConnsPerHost = config.Reframe.MaxConnsPerHost
+	t.MaxIdleConnsPerHost = config.Reframe.MaxIdleConnsPerHost
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 15 * time.Second,
+			Timeout:   config.Reframe.DialerTimeout,
+			KeepAlive: config.Reframe.DialerKeepAlive,
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
 
 	httpClient := http.Client{
 		Transport: t,
-		Timeout:   10 * time.Second,
+		Timeout:   config.Reframe.HttpClientTimeout,
 	}
 
 	clients := make([]*backendDelegatedRoutingClient, 0, len(backends))
@@ -117,7 +117,7 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 
 		pids := make(map[peer.ID]struct{})
 		var rerr error
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(config.Reframe.ResultMaxWait)
 		for {
 			select {
 			case <-ctx.Done():

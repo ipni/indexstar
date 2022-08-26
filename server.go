@@ -7,14 +7,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"time"
 
 	logging "github.com/ipfs/go-log/v2"
-
 	"github.com/urfave/cli/v2"
 )
-
-const maxRequestBodySize = 8 << 10 // 8KiB
 
 var log = logging.Logger("indexstar/mux")
 
@@ -45,14 +41,21 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 100
-	t.MaxConnsPerHost = 100
-	t.MaxIdleConnsPerHost = 100
+	t.MaxIdleConns = config.Server.MaxIdleConns
+	t.MaxConnsPerHost = config.Server.MaxIdleConnsPerHost
+	t.MaxIdleConnsPerHost = config.Server.MaxIdleConnsPerHost
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout:   config.Server.DialerTimeout,
+			KeepAlive: config.Server.DialerKeepAlive,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
 
 	s := server{
 		Context: c.Context,
 		Client: http.Client{
-			Timeout:   10 * time.Second,
+			Timeout:   config.Server.HttpClientTimeout,
 			Transport: t,
 		},
 		Listener: bound,
@@ -80,7 +83,7 @@ func (s *server) Serve() chan error {
 	mux.Handle("/", s)
 
 	serv := http.Server{
-		Handler: http.MaxBytesHandler(mux, maxRequestBodySize),
+		Handler: http.MaxBytesHandler(mux, config.Server.MaxRequestBodySize),
 	}
 	go func() {
 		log.Infow("finder http server listening", "listen_addr", s.Listener.Addr())
