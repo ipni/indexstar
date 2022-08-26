@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -27,20 +29,27 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	t.MaxIdleConns = 100
 	t.MaxConnsPerHost = 100
 	t.MaxIdleConnsPerHost = 100
-
-	httpClient := http.Client{
-		Timeout:   5 * time.Second,
-		Transport: t,
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 15 * time.Second,
+		}
+		return dialer.DialContext(ctx, network, addr)
 	}
 
-	clients := make([]backendDelegatedRoutingClient, 0, len(backends))
+	httpClient := http.Client{
+		Transport: t,
+		Timeout:   10 * time.Second,
+	}
+
+	clients := make([]*backendDelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
 		endpoint := b.JoinPath("reframe").String()
 		q, err := drproto.New_DelegatedRouting_Client(endpoint, drproto.DelegatedRouting_Client_WithHTTPClient(&httpClient))
 		if err != nil {
 			return nil, err
 		}
-		clients = append(clients, backendDelegatedRoutingClient{
+		clients = append(clients, &backendDelegatedRoutingClient{
 			DelegatedRoutingClient: drclient.NewClient(q),
 			url:                    b,
 		})
@@ -49,7 +58,7 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 }
 
 type ReframeService struct {
-	backends []backendDelegatedRoutingClient
+	backends []*backendDelegatedRoutingClient
 }
 
 type backendDelegatedRoutingClient struct {
@@ -58,43 +67,58 @@ type backendDelegatedRoutingClient struct {
 }
 
 func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	out := make(chan drclient.FindProvidersAsyncResult, 1)
 	cout := make(chan drclient.FindProvidersAsyncResult, 1)
+	var wg sync.WaitGroup
+	for _, b := range x.backends {
+		wg.Add(1)
+		go func(backend *backendDelegatedRoutingClient) {
+			defer wg.Done()
+
+			select {
+			case <-ctx.Done():
+				log.Errorw("context is done before finishing call instantiation", "url", backend.url, "err", ctx.Err())
+				return
+			default:
+			}
+
+			bout, err := backend.FindProvidersAsync(ctx, key)
+			if err != nil {
+				log.Errorw("failed to instantiate async find on backend", "url", backend.url, "err", err)
+				return
+			}
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case r, ok := <-bout:
+					if !ok {
+						return
+					}
+					cout <- r
+				}
+			}
+		}(b)
+	}
 
 	go func() {
-		for _, b := range x.backends {
-			bout, err := b.FindProvidersAsync(ctx, key)
-			if err != nil {
-				log.Errorw("failed to instantiate asyc find on backend", "url", b.url, "err", err)
-				continue
-			}
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case r, ok := <-bout:
-						if !ok {
-							return
-						}
-						cout <- r
-					}
-				}
-			}()
-		}
+		defer close(cout)
+		wg.Wait()
 	}()
 
+	out := make(chan drclient.FindProvidersAsyncResult, 1)
 	go func() {
 		defer close(out)
-		defer close(cout)
-		defer cancel()
 
 		pids := make(map[peer.ID]struct{})
 		var rerr error
+		ticker := time.NewTicker(5 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				log.Infow("time is up; closing off channels", "pid_count", len(pids), "rerr", rerr)
 				if len(pids) == 0 {
 					var result drclient.FindProvidersAsyncResult
 					if rerr != nil {
@@ -104,7 +128,19 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 					out <- result
 				}
 				return
-			case r := <-cout:
+			case r, ok := <-cout:
+				if !ok {
+					log.Infow("all done in time", "pid_count", len(pids), "rerr", rerr)
+					if len(pids) == 0 {
+						var result drclient.FindProvidersAsyncResult
+						if rerr != nil {
+							log.Warnw("no providers found but error occurred", "err", rerr, "key", key)
+							result.Err = rerr
+						}
+						out <- result
+					}
+					return
+				}
 				if r.Err != nil {
 					rerr = r.Err
 				} else {
