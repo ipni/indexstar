@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +12,7 @@ import (
 	drclient "github.com/ipfs/go-delegated-routing/client"
 	drproto "github.com/ipfs/go-delegated-routing/gen/proto"
 	drserver "github.com/ipfs/go-delegated-routing/server"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 )
 
@@ -31,7 +31,7 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	t.MaxIdleConnsPerHost = 100
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{
-			Timeout:   5 * time.Second,
+			Timeout:   10 * time.Second,
 			KeepAlive: 15 * time.Second,
 		}
 		return dialer.DialContext(ctx, network, addr)
@@ -67,6 +67,7 @@ type backendDelegatedRoutingClient struct {
 }
 
 func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
+	startTime := time.Now()
 	cout := make(chan drclient.FindProvidersAsyncResult, 1)
 	var wg sync.WaitGroup
 	for _, b := range x.backends {
@@ -109,6 +110,10 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 	out := make(chan drclient.FindProvidersAsyncResult, 1)
 	go func() {
 		defer close(out)
+		defer func() {
+			elapsed := time.Now().Sub(startTime)
+			log.Infow("took", "elapsed", elapsed.String())
+		}()
 
 		pids := make(map[peer.ID]struct{})
 		var rerr error
@@ -130,7 +135,7 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 				return
 			case r, ok := <-cout:
 				if !ok {
-					log.Infow("all done in time", "pid_count", len(pids), "rerr", rerr)
+					log.Debugw("all done in time", "pid_count", len(pids), "rerr", rerr)
 					if len(pids) == 0 {
 						var result drclient.FindProvidersAsyncResult
 						if rerr != nil {
@@ -142,6 +147,7 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 					return
 				}
 				if r.Err != nil {
+					log.Errorw("got error back from backend", "err", r.Err)
 					rerr = r.Err
 				} else {
 					var result drclient.FindProvidersAsyncResult
