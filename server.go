@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/filecoin-shipyard/indexstar/httpserver"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/urfave/cli/v2"
@@ -70,6 +71,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/multihash", s.find)
 	mux.HandleFunc("/multihash/", s.find)
 	mux.HandleFunc("/providers", s.providers)
+	mux.HandleFunc("/health", s.health)
 	reframe, err := NewReframeHTTPHandler(s.servers)
 	if err != nil {
 		ec <- err
@@ -100,6 +102,10 @@ func (s *server) Serve() chan error {
 		}
 	}()
 	return ec
+}
+
+func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	httpserver.WriteJsonResponse(w, http.StatusOK, []byte("ready"))
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
