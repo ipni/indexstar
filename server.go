@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"time"
 
 	"github.com/filecoin-shipyard/indexstar/httpserver"
 	"github.com/filecoin-shipyard/indexstar/metrics"
@@ -15,8 +14,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 )
-
-const maxRequestBodySize = 8 << 10 // 8KiB
 
 var log = logging.Logger("indexstar/mux")
 
@@ -52,14 +49,14 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 100
-	t.MaxConnsPerHost = 100
-	t.MaxIdleConnsPerHost = 100
+	t.MaxIdleConns = config.Server.MaxIdleConns
+	t.MaxConnsPerHost = config.Server.MaxConnsPerHost
+	t.MaxIdleConnsPerHost = config.Server.MaxIdleConnsPerHost
 
 	s := server{
 		Context: c.Context,
 		Client: http.Client{
-			Timeout:   10 * time.Second,
+			Timeout:   config.Server.HttpClientTimeout,
 			Transport: t,
 		},
 		Listener:        bound,
@@ -89,7 +86,7 @@ func (s *server) Serve() chan error {
 	mux.Handle("/", s)
 
 	serv := http.Server{
-		Handler: http.MaxBytesHandler(mux, maxRequestBodySize),
+		Handler: http.MaxBytesHandler(mux, config.Server.MaxRequestBodySize),
 	}
 	go func() {
 		log.Infow("finder http server listening", "listen_addr", s.Listener.Addr())
@@ -103,7 +100,7 @@ func (s *server) Serve() chan error {
 	metricsMux.Handle("/metrics", metrics.Start(nil))
 	metricsMux.Handle("/pprof", metrics.WithProfile())
 	metricsServ := http.Server{
-		Handler: http.MaxBytesHandler(metricsMux, maxRequestBodySize),
+		Handler: http.MaxBytesHandler(metricsMux, config.Server.MaxRequestBodySize),
 	}
 	go func() {
 		log.Infow("metrics server listening", "listen_addr", s.metricsListener.Addr())
