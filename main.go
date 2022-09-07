@@ -19,6 +19,11 @@ func main() {
 				Usage: "listen address",
 				Value: ":8080",
 			},
+			&cli.StringFlag{
+				Name:  "metrics",
+				Usage: "metrics address",
+				Value: ":8081",
+			},
 			&cli.StringSliceFlag{
 				Name:  "backends",
 				Usage: "backends to use",
