@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-	"time"
 
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
@@ -24,12 +23,12 @@ func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
 
 func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 100
-	t.MaxConnsPerHost = 100
-	t.MaxIdleConnsPerHost = 100
+	t.MaxIdleConns = config.Reframe.MaxIdleConns
+	t.MaxConnsPerHost = config.Reframe.MaxConnsPerHost
+	t.MaxIdleConnsPerHost = config.Reframe.MaxIdleConnsPerHost
 
 	httpClient := http.Client{
-		Timeout:   5 * time.Second,
+		Timeout:   config.Reframe.HttpClientTimeout,
 		Transport: t,
 	}
 
@@ -88,10 +87,10 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 	return out, nil
 }
 
-func (x *ReframeService) GetIPNS(_ context.Context, _ []byte) (<-chan drclient.GetIPNSAsyncResult, error) {
+func (x *ReframeService) GetIPNS(context.Context, []byte) (<-chan drclient.GetIPNSAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }
 
-func (x *ReframeService) PutIPNS(_ context.Context, _ []byte, _ []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
+func (x *ReframeService) PutIPNS(context.Context, []byte, []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }

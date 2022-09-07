@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -106,7 +106,7 @@ outer:
 				// weird / invalid.
 				log.Warnw("conflicting results", "q", r.URL.Path, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
 
-				httpserver.HandleError(w, fmt.Errorf("conflicting results"), "get")
+				httpserver.HandleError(w, errors.New("conflicting results"), http.MethodGet)
 				continue
 			}
 			for _, pr := range prov.MultihashResults[0].ProviderResults {
