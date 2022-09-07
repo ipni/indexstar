@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/filecoin-shipyard/indexstar/httpserver"
+	"github.com/filecoin-shipyard/indexstar/metrics"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/urfave/cli/v2"
@@ -23,12 +24,17 @@ type server struct {
 	context.Context
 	http.Client
 	net.Listener
-	servers []*url.URL
-	base    http.Handler
+	metricsListener net.Listener
+	servers         []*url.URL
+	base            http.Handler
 }
 
 func NewServer(c *cli.Context) (*server, error) {
 	bound, err := net.Listen("tcp", c.String("listen"))
+	if err != nil {
+		return nil, err
+	}
+	mb, err := net.Listen("tcp", c.String("metrics"))
 	if err != nil {
 		return nil, err
 	}
@@ -56,9 +62,10 @@ func NewServer(c *cli.Context) (*server, error) {
 			Timeout:   10 * time.Second,
 			Transport: t,
 		},
-		Listener: bound,
-		servers:  surls,
-		base:     httputil.NewSingleHostReverseProxy(surls[0]),
+		Listener:        bound,
+		metricsListener: mb,
+		servers:         surls,
+		base:            httputil.NewSingleHostReverseProxy(surls[0]),
 	}
 	return &s, nil
 }
@@ -91,6 +98,21 @@ func (s *server) Serve() chan error {
 			ec <- e
 		}
 	}()
+
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", metrics.Start(nil))
+	metricsMux.Handle("/pprof", metrics.WithProfile())
+	metricsServ := http.Server{
+		Handler: http.MaxBytesHandler(metricsMux, maxRequestBodySize),
+	}
+	go func() {
+		log.Infow("metrics server listening", "listen_addr", s.metricsListener.Addr())
+		e := metricsServ.Serve(s.metricsListener)
+		if s.Context.Err() == nil {
+			ec <- e
+		}
+	}()
+
 	go func() {
 		defer close(ec)
 

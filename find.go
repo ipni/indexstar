@@ -2,19 +2,32 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/filecoin-shipyard/indexstar/httpserver"
+	"github.com/filecoin-shipyard/indexstar/metrics"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 )
 
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	combined := make(chan *model.FindResponse, len(s.servers))
 	wg := sync.WaitGroup{}
+	start := time.Now()
+	tags := []tag.Mutator{}
+	defer func() {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(tags...),
+			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
+	}()
 
 	// Copy the original request body in case it is a POST batch find request.
 	var rb []byte
@@ -22,10 +35,12 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	rb, err = io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
+		tags = append(tags, tag.Insert(metrics.Found, "client_error"))
 		log.Warnw("failed to read original request body", "err", err)
 		return
 	}
 
+	count := atomic.Int32{}
 	for _, server := range s.servers {
 		wg.Add(1)
 		go func(server *url.URL) {
@@ -61,18 +76,23 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if resp.StatusCode == http.StatusOK {
+				_ = count.Add(1)
 				providers, err := model.UnmarshalFindResponse(data)
 				if err == nil {
 					combined <- providers
 				} else {
 					log.Warnw("failed backend unmarshal", "err", err)
 				}
+			} else if resp.StatusCode == http.StatusNotFound {
+				_ = count.Add(1)
 			}
 		}(server)
 	}
 	go func() {
 		wg.Wait()
 		close(combined)
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithMeasurements(metrics.FindBackends.M(float64(count.Load()))))
 	}()
 
 	// TODO: stream out partial response as they come in.
@@ -101,8 +121,11 @@ outer:
 	}
 
 	if resp.MultihashResults == nil {
+		tags = append(tags, tag.Insert(metrics.Found, "no"))
 		http.Error(w, "no results for query", http.StatusNotFound)
 		return
+	} else {
+		tags = append(tags, tag.Insert(metrics.Found, "yes"))
 	}
 
 	// write out combined.
