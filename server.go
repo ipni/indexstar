@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/filecoin-shipyard/indexstar/httpserver"
+	"github.com/filecoin-shipyard/indexstar/metrics"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/urfave/cli/v2"
@@ -72,6 +73,8 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/multihash/", s.find)
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/health", s.health)
+	mux.Handle("/metrics", metrics.Start(nil))
+	mux.Handle("/pprof", metrics.WithProfile())
 	reframe, err := NewReframeHTTPHandler(s.servers)
 	if err != nil {
 		ec <- err
