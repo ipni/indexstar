@@ -6,7 +6,7 @@ require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
 	github.com/filecoin-project/storetheindex v0.4.23-0.20220908083639-68e955d76508
 	github.com/ipfs/go-cid v0.2.0
-	github.com/ipfs/go-delegated-routing v0.3.0
+	github.com/ipfs/go-delegated-routing v0.5.1
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p-core v0.19.1
 	github.com/multiformats/go-multicodec v0.5.0
@@ -34,8 +34,8 @@ require (
 	github.com/ipfs/go-ipfs-util v0.0.2 // indirect
 	github.com/ipfs/go-ipns v0.1.2 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
-	github.com/ipld/edelweiss v0.1.4 // indirect
-	github.com/ipld/go-ipld-prime v0.17.0 // indirect
+	github.com/ipld/edelweiss v0.2.0 // indirect
+	github.com/ipld/go-ipld-prime v0.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.14 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-libp2p-record v0.1.3 // indirect

@@ -35,8 +35,12 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 		if err != nil {
 			return nil, err
 		}
+		drc, err := drclient.NewClient(q, nil, nil)
+		if err != nil {
+			return nil, err
+		}
 		clients = append(clients, &backendDelegatedRoutingClient{
-			DelegatedRoutingClient: drclient.NewClient(q),
+			DelegatedRoutingClient: drc,
 			url:                    b,
 		})
 	}
@@ -147,5 +151,9 @@ func (x *ReframeService) GetIPNS(context.Context, []byte) (<-chan drclient.GetIP
 }
 
 func (x *ReframeService) PutIPNS(context.Context, []byte, []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
+	return nil, routing.ErrNotSupported
+}
+
+func (x *ReframeService) Provide(context.Context, *drclient.ProvideRequest) (<-chan drclient.ProvideAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }
