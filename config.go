@@ -13,6 +13,7 @@ const (
 	defaultReframeDialerTimeout       = 10 * time.Second
 	defaultReframeDialerKeepAlive     = 15 * time.Second
 	defaultReframeHttpClientTimeout   = 10 * time.Second
+	defaultReframeResultMaxWait       = 5 * time.Second
 
 	defaultServerMaxIdleConns              = 100
 	defaultServerMaxConnsPerHost           = 100
@@ -31,6 +32,7 @@ var config struct {
 		DialerTimeout       time.Duration
 		DialerKeepAlive     time.Duration
 		HttpClientTimeout   time.Duration
+		ResultMaxWait       time.Duration
 	}
 	Server struct {
 		MaxIdleConns        int
@@ -50,6 +52,8 @@ func init() {
 	config.Reframe.DialerTimeout = getEnvOrDefault[time.Duration]("REFRAME_DIALER_TIMEOUT", defaultReframeDialerTimeout)
 	config.Reframe.DialerKeepAlive = getEnvOrDefault[time.Duration]("REFRAME_DIALER_KEEP_ALIVE", defaultReframeDialerKeepAlive)
 	config.Reframe.HttpClientTimeout = getEnvOrDefault[time.Duration]("REFRAME_HTTP_CLIENT_TIMEOUT", defaultReframeHttpClientTimeout)
+	config.Reframe.ResultMaxWait = getEnvOrDefault[time.Duration]("REFRAME_RESULT_MAX_WAIT", defaultReframeResultMaxWait)
+
 	config.Server.MaxIdleConns = getEnvOrDefault[int]("SERVER_MAX_IDLE_CONNS", defaultServerMaxIdleConns)
 	config.Server.MaxConnsPerHost = getEnvOrDefault[int]("SERVER_MAX_CONNS_PER_HOST", defaultServerMaxConnsPerHost)
 	config.Server.MaxIdleConnsPerHost = getEnvOrDefault[int]("SERVER_MAX_IDLE_CONNS_PER_HOST", defaultServerMaxIdleConnsPerHost)
