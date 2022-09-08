@@ -27,14 +27,9 @@ func NewReframeTranslatorHTTPHandler(backends []*url.URL) (http.HandlerFunc, err
 }
 
 func NewReframeTranslatorService(backends []*url.URL) (*ReframeTranslatorService, error) {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = config.Reframe.MaxIdleConns
-	t.MaxConnsPerHost = config.Reframe.MaxConnsPerHost
-	t.MaxIdleConnsPerHost = config.Reframe.MaxIdleConnsPerHost
-
 	httpClient := http.Client{
 		Timeout:   config.Reframe.HttpClientTimeout,
-		Transport: t,
+		Transport: reframeRoundTripper(),
 	}
 
 	clients := make([]*finderhttpclient.Client, 0, len(backends))

@@ -53,7 +53,13 @@ func NewServer(c *cli.Context) (*server, error) {
 	t.MaxIdleConns = config.Server.MaxIdleConns
 	t.MaxConnsPerHost = config.Server.MaxConnsPerHost
 	t.MaxIdleConnsPerHost = config.Server.MaxIdleConnsPerHost
-
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout:   config.Server.DialerTimeout,
+			KeepAlive: config.Server.DialerKeepAlive,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
 	s := server{
 		Context: c.Context,
 		Client: http.Client{

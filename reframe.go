@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -22,14 +23,9 @@ func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
 }
 
 func NewReframeService(backends []*url.URL) (*ReframeService, error) {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = config.Reframe.MaxIdleConns
-	t.MaxConnsPerHost = config.Reframe.MaxConnsPerHost
-	t.MaxIdleConnsPerHost = config.Reframe.MaxIdleConnsPerHost
-
 	httpClient := http.Client{
 		Timeout:   config.Reframe.HttpClientTimeout,
-		Transport: t,
+		Transport: reframeRoundTripper(),
 	}
 
 	clients := make([]drclient.DelegatedRoutingClient, 0, len(backends))
@@ -42,6 +38,21 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 		clients = append(clients, drclient.NewClient(q))
 	}
 	return &ReframeService{clients}, nil
+}
+
+func reframeRoundTripper() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = config.Reframe.MaxIdleConns
+	t.MaxConnsPerHost = config.Reframe.MaxConnsPerHost
+	t.MaxIdleConnsPerHost = config.Reframe.MaxIdleConnsPerHost
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout:   config.Reframe.DialerTimeout,
+			KeepAlive: config.Reframe.DialerKeepAlive,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+	return t
 }
 
 type ReframeService struct {
