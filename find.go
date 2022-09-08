@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,8 +19,6 @@ import (
 )
 
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
-	combined := make(chan *model.FindResponse, len(s.servers))
-	wg := sync.WaitGroup{}
 	start := time.Now()
 	tags := []tag.Mutator{}
 	defer func() {
@@ -30,9 +28,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Copy the original request body in case it is a POST batch find request.
-	var rb []byte
-	var err error
-	rb, err = io.ReadAll(r.Body)
+	rb, err := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
 		tags = append(tags, tag.Insert(metrics.Found, "client_error"))
@@ -40,65 +36,71 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count := atomic.Int32{}
-	for _, server := range s.servers {
-		wg.Add(1)
-		go func(server *url.URL) {
-			defer wg.Done()
-
-			// Copy the URL from original request and override host/schema to point
-			// to the server.
-			endpoint := *r.URL
-			endpoint.Host = server.Host
-			endpoint.Scheme = server.Scheme
-			log := log.With("backend", endpoint)
-
-			// If body in original request existed, make a reader for it.
-			var body io.Reader
-			if len(rb) > 0 {
-				body = bytes.NewReader(rb)
-			}
-			req, err := http.NewRequest(r.Method, endpoint.String(), body)
-			if err != nil {
-				log.Warnw("failed to construct query", "err", err)
-				return
-			}
-			req.Header.Set("X-Forwarded-Host", r.Host)
-			resp, err := s.Client.Do(req)
-			if err != nil {
-				log.Warnw("failed query", "err", err)
-				return
-			}
-			defer resp.Body.Close()
-			data, err := io.ReadAll(resp.Body)
-			if err != nil {
-				log.Warnw("failed backend read", "err", err)
-				return
-			}
-			if resp.StatusCode == http.StatusOK {
-				_ = count.Add(1)
-				providers, err := model.UnmarshalFindResponse(data)
-				if err == nil {
-					combined <- providers
-				} else {
-					log.Warnw("failed backend unmarshal", "err", err)
-				}
-			} else if resp.StatusCode == http.StatusNotFound {
-				_ = count.Add(1)
-			}
-		}(server)
+	sg := &scatterGather[*url.URL, *model.FindResponse]{
+		targets: s.servers,
+		maxWait: config.Server.ResultMaxWait,
 	}
-	go func() {
-		wg.Wait()
-		close(combined)
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithMeasurements(metrics.FindBackends.M(float64(count.Load()))))
-	}()
+
+	count := atomic.Int32{}
+	ctx := context.Background()
+	if err := sg.scatter(ctx, func(b *url.URL) (<-chan *model.FindResponse, error) {
+		// Copy the URL from original request and override host/schema to point
+		// to the server.
+		endpoint := *r.URL
+		endpoint.Host = b.Host
+		endpoint.Scheme = b.Scheme
+		log := log.With("backend", endpoint)
+
+		// If body in original request existed, make a reader for it.
+		var body io.Reader
+		if len(rb) > 0 {
+			body = bytes.NewReader(rb)
+		}
+		req, err := http.NewRequest(r.Method, endpoint.String(), body)
+		if err != nil {
+			log.Warnw("Failed to construct backend query", "err", err)
+			return nil, err
+		}
+		req.Header.Set("X-Forwarded-Host", r.Host)
+		resp, err := s.Client.Do(req)
+		if err != nil {
+			log.Warnw("Failed to query backend", "err", err)
+			return nil, err
+		}
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Warnw("Failed to read backend response", "err", err)
+			return nil, err
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			_ = count.Add(1)
+			providers, err := model.UnmarshalFindResponse(data)
+			if err != nil {
+				return nil, err
+			}
+			r := make(chan *model.FindResponse, 1)
+			r <- providers
+			close(r)
+			return r, nil
+		case http.StatusNotFound:
+			_ = count.Add(1)
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.String())
+		}
+	}); err != nil {
+		log.Errorw("Failed to scatter HTTP find request", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
 
 	// TODO: stream out partial response as they come in.
 	var resp model.FindResponse
 outer:
-	for prov := range combined {
+	for prov := range sg.gather(ctx) {
 		if resp.MultihashResults == nil {
 			resp.MultihashResults = prov.MultihashResults
 		} else {
@@ -119,6 +121,9 @@ outer:
 			}
 		}
 	}
+
+	_ = stats.RecordWithOptions(context.Background(),
+		stats.WithMeasurements(metrics.FindBackends.M(float64(count.Load()))))
 
 	if resp.MultihashResults == nil {
 		tags = append(tags, tag.Insert(metrics.Found, "no"))
