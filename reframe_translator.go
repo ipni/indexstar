@@ -100,3 +100,7 @@ func (x *ReframeTranslatorService) GetIPNS(context.Context, []byte) (<-chan drcl
 func (x *ReframeTranslatorService) PutIPNS(context.Context, []byte, []byte) (<-chan drclient.PutIPNSAsyncResult, error) {
 	return nil, routing.ErrNotSupported
 }
+
+func (x *ReframeTranslatorService) Provide(context.Context, *drclient.ProvideRequest) (<-chan drclient.ProvideAsyncResult, error) {
+	return nil, routing.ErrNotSupported
+}
