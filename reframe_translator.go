@@ -39,7 +39,7 @@ func NewReframeTranslatorService(backends []*url.URL) (*ReframeTranslatorService
 
 	clients := make([]*finderhttpclient.Client, 0, len(backends))
 	for _, b := range backends {
-		bc, err := finderhttpclient.New(b.String(), httpclient.Timeout(httpClient.Timeout))
+		bc, err := finderhttpclient.New(b.String(), httpclient.WithClient(&httpClient))
 		if err != nil {
 			return nil, err
 		}
