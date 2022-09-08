@@ -29,6 +29,10 @@ func main() {
 				Usage: "backends to use",
 				Value: cli.NewStringSlice("https://cid.contact/"),
 			},
+			&cli.BoolFlag{
+				Name:  "translateReframe",
+				Usage: "translate reframe requests into find requests to backends",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			exit := make(chan os.Signal, 1)
