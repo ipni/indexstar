@@ -21,6 +21,7 @@ const (
 	defaultServerDialerTimeout             = 10 * time.Second
 	defaultServerDialerKeepAlive           = 15 * time.Second
 	defaultServerHttpClientTimeout         = 10 * time.Second
+	defaultServerResultMaxWait             = 5 * time.Second
 	defaultServerMaxRequestBodySize  int64 = 8 << 10 // 8KiB
 )
 
@@ -41,6 +42,7 @@ var config struct {
 		DialerTimeout       time.Duration
 		DialerKeepAlive     time.Duration
 		HttpClientTimeout   time.Duration
+		ResultMaxWait       time.Duration
 		MaxRequestBodySize  int64
 	}
 }
@@ -60,6 +62,7 @@ func init() {
 	config.Server.DialerTimeout = getEnvOrDefault[time.Duration]("SERVER_DIALER_TIMEOUT", defaultServerDialerTimeout)
 	config.Server.DialerKeepAlive = getEnvOrDefault[time.Duration]("SERVER_DIALER_KEEP_ALIVE", defaultServerDialerKeepAlive)
 	config.Server.HttpClientTimeout = getEnvOrDefault[time.Duration]("SERVER_HTTP_CLIENT_TIMEOUT", defaultServerHttpClientTimeout)
+	config.Server.ResultMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_MAX_WAIT", defaultServerResultMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)
 }
 
