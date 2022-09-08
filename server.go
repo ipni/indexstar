@@ -21,9 +21,10 @@ type server struct {
 	context.Context
 	http.Client
 	net.Listener
-	metricsListener net.Listener
-	servers         []*url.URL
-	base            http.Handler
+	metricsListener  net.Listener
+	servers          []*url.URL
+	base             http.Handler
+	translateReframe bool
 }
 
 func NewServer(c *cli.Context) (*server, error) {
@@ -59,10 +60,11 @@ func NewServer(c *cli.Context) (*server, error) {
 			Timeout:   config.Server.HttpClientTimeout,
 			Transport: t,
 		},
-		Listener:        bound,
-		metricsListener: mb,
-		servers:         surls,
-		base:            httputil.NewSingleHostReverseProxy(surls[0]),
+		Listener:         bound,
+		metricsListener:  mb,
+		servers:          surls,
+		base:             httputil.NewSingleHostReverseProxy(surls[0]),
+		translateReframe: c.Bool("translateReframe"),
 	}
 	return &s, nil
 }
@@ -76,13 +78,24 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/multihash/", s.find)
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/health", s.health)
-	reframe, err := NewReframeHTTPHandler(s.servers)
-	if err != nil {
-		ec <- err
-		close(ec)
-		return ec
+
+	if s.translateReframe {
+		reframe, err := NewReframeTranslatorHTTPHandler(s.servers)
+		if err != nil {
+			ec <- err
+			close(ec)
+			return ec
+		}
+		mux.HandleFunc("/reframe", reframe)
+	} else {
+		reframe, err := NewReframeHTTPHandler(s.servers)
+		if err != nil {
+			ec <- err
+			close(ec)
+			return ec
+		}
+		mux.HandleFunc("/reframe", reframe)
 	}
-	mux.HandleFunc("/reframe", reframe)
 	mux.Handle("/", s)
 
 	serv := http.Server{
