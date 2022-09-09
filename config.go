@@ -88,8 +88,8 @@ func getEnvOrDefault[T any](key string, def T) T {
 		return any(pv).(T)
 	case time.Duration:
 		pv, err := time.ParseDuration(v)
-		log.Warnf("Failed to parse %s=%s environment variable as time.Duration. Falling back on default %v", key, v, def)
 		if err != nil {
+			log.Warnf("Failed to parse %s=%s environment variable as time.Duration. Falling back on default %v", key, v, def)
 			return def
 		}
 		return any(pv).(T)
