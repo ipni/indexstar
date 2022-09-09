@@ -51,7 +51,7 @@ func (s *server) doFind(ctx context.Context, method string, req *url.URL, body [
 	}
 
 	count := atomic.Int32{}
-	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (<-chan *model.FindResponse, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (**model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
@@ -86,10 +86,7 @@ func (s *server) doFind(ctx context.Context, method string, req *url.URL, body [
 			if err != nil {
 				return nil, err
 			}
-			r := make(chan *model.FindResponse, 1)
-			r <- providers
-			close(r)
-			return r, nil
+			return &providers, nil
 		case http.StatusNotFound:
 			_ = count.Add(1)
 			return nil, nil

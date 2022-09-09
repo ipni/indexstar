@@ -14,7 +14,7 @@ type scatterGather[T, R any] struct {
 	maxWait time.Duration
 }
 
-func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context.Context, T) (<-chan R, error)) error {
+func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context.Context, T) (*R, error)) error {
 	sg.start = time.Now()
 	sg.out = make(chan R, 1)
 	for _, t := range sg.targets {
@@ -38,14 +38,12 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 			}
 
 			if sout != nil {
-				for r := range sout {
-					if ctx.Err() == nil {
-						select {
-						case <-ctx.Done():
-							continue
-						case sg.out <- r:
-							continue
-						}
+				if ctx.Err() == nil {
+					select {
+					case <-ctx.Done():
+						return
+					case sg.out <- *sout:
+						return
 					}
 				}
 			}
