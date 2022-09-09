@@ -14,7 +14,7 @@ type scatterGather[T, R any] struct {
 	maxWait time.Duration
 }
 
-func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(T) (<-chan R, error)) error {
+func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context.Context, T) (<-chan R, error)) error {
 	sg.start = time.Now()
 	sg.out = make(chan R, 1)
 	for _, t := range sg.targets {
@@ -29,21 +29,24 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(T) (<-c
 			default:
 			}
 
-			sout, err := forEach(target)
+			cctx, cncl := context.WithTimeout(ctx, sg.maxWait)
+			sout, err := forEach(cctx, target)
+			cncl()
 			if err != nil {
 				log.Errorw("failed to scatter on target", "target", target, "err", err)
 				return
 			}
 
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case r, ok := <-sout:
-					if !ok {
-						return
+			if sout != nil {
+				for r := range sout {
+					if ctx.Err() == nil {
+						select {
+						case <-ctx.Done():
+							continue
+						case sg.out <- r:
+							continue
+						}
 					}
-					sg.out <- r
 				}
 			}
 		}(t)
@@ -64,21 +67,12 @@ func (sg *scatterGather[_, R]) gather(ctx context.Context) <-chan R {
 			log.Debugw("Completed scatter gather", "elapsed", elapsed.String())
 		}()
 
-		var rerr error
-		ticker := time.NewTicker(sg.maxWait)
-		for {
+		for r := range sg.out {
 			select {
 			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				log.Debugw("Maximum scatter gather wait time reached; closing off channels", "rerr", rerr)
-				return
-			case r, ok := <-sg.out:
-				if !ok {
-					log.Debugw("Gathered all scatters in time", "rerr", rerr)
-					return
-				}
-				gout <- r
+				continue
+			case gout <- r:
+				continue
 			}
 		}
 	}()

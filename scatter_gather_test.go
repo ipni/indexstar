@@ -17,9 +17,12 @@ func TestScatterGather_GathersExpectedResults(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := subject.scatter(ctx, func(i int) (<-chan string, error) {
+	err := subject.scatter(ctx, func(cctx context.Context, i int) (<-chan string, error) {
 		r := make(chan string, 1)
-		r <- fmt.Sprintf("%d fish", i)
+		if cctx.Err() == nil {
+			r <- fmt.Sprintf("%d fish", i)
+		}
+		close(r)
 		return r, nil
 	})
 	require.NoError(t, err)
@@ -42,12 +45,15 @@ func TestScatterGather_ExcludesScatterErrors(t *testing.T) {
 		maxWait: 2 * time.Second,
 	}
 	ctx := context.Background()
-	err := subject.scatter(ctx, func(i int) (<-chan string, error) {
+	err := subject.scatter(ctx, func(cctx context.Context, i int) (<-chan string, error) {
 		if i == 2 {
 			return nil, errors.New("fish says no")
 		}
 		r := make(chan string, 1)
-		r <- fmt.Sprintf("%d fish", i)
+		if cctx.Err() == nil {
+			r <- fmt.Sprintf("%d fish", i)
+		}
+		close(r)
 		return r, nil
 	})
 	require.NoError(t, err)
@@ -68,10 +74,13 @@ func TestScatterGather_DoesNotWaitLongerThanExpected(t *testing.T) {
 		maxWait: 100 * time.Millisecond,
 	}
 	ctx := context.Background()
-	err := subject.scatter(ctx, func(i int) (<-chan string, error) {
+	err := subject.scatter(ctx, func(cctx context.Context, i int) (<-chan string, error) {
 		time.Sleep(2 * time.Second)
 		r := make(chan string, 1)
-		r <- fmt.Sprintf("%d fish", i)
+		if cctx.Err() == nil {
+			r <- fmt.Sprintf("%d fish", i)
+		}
+		close(r)
 		return r, nil
 	})
 	require.NoError(t, err)
@@ -91,9 +100,11 @@ func TestScatterGather_GathersNothingWhenContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	cancel()
 
-	err := subject.scatter(ctx, func(i int) (<-chan string, error) {
+	err := subject.scatter(ctx, func(cctx context.Context, i int) (<-chan string, error) {
 		r := make(chan string, 1)
-		r <- fmt.Sprintf("%d fish", i)
+		if cctx.Err() == nil {
+			r <- fmt.Sprintf("%d fish", i)
+		}
 		return r, nil
 	})
 	require.NoError(t, err)

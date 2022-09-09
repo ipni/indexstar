@@ -51,7 +51,7 @@ func (s *server) doFind(ctx context.Context, method string, req *url.URL, body [
 	}
 
 	count := atomic.Int32{}
-	if err := sg.scatter(ctx, func(b *url.URL) (<-chan *model.FindResponse, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (<-chan *model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
@@ -61,7 +61,7 @@ func (s *server) doFind(ctx context.Context, method string, req *url.URL, body [
 
 		bodyReader := bytes.NewReader(body)
 
-		req, err := http.NewRequest(method, endpoint.String(), bodyReader)
+		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), bodyReader)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
 			return nil, err
