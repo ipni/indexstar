@@ -86,7 +86,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/health", s.health)
 
 	if s.translateReframe {
-		reframe, err := NewReframeTranslatorHTTPHandler(s.servers)
+		reframe, err := NewReframeTranslatorHTTPHandler(s.doFind)
 		if err != nil {
 			ec <- err
 			close(ec)

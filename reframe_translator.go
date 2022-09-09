@@ -3,87 +3,90 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
-	"sync"
 
-	finderhttpclient "github.com/filecoin-project/storetheindex/api/v0/finder/client/http"
-	"github.com/filecoin-project/storetheindex/api/v0/httpclient"
+	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
 	drserver "github.com/ipfs/go-delegated-routing/server"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
 )
 
-func NewReframeTranslatorHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
-	svc, err := NewReframeTranslatorService(backends)
+type findFunc func(ctx context.Context, method string, req *url.URL, body []byte) (int, []byte)
+
+func NewReframeTranslatorHTTPHandler(backend findFunc) (http.HandlerFunc, error) {
+	svc, err := NewReframeTranslatorService(backend)
 	if err != nil {
 		return nil, err
 	}
 	return drserver.DelegatedRoutingAsyncHandler(svc), nil
 }
 
-func NewReframeTranslatorService(backends []*url.URL) (*ReframeTranslatorService, error) {
-	httpClient := http.Client{
-		Timeout:   config.Reframe.HttpClientTimeout,
-		Transport: reframeRoundTripper(),
-	}
-
-	clients := make([]*finderhttpclient.Client, 0, len(backends))
-	for _, b := range backends {
-		bc, err := finderhttpclient.New(b.String(), httpclient.WithClient(&httpClient))
-		if err != nil {
-			return nil, err
-		}
-		clients = append(clients, bc)
-	}
-
-	return &ReframeTranslatorService{clients}, nil
+func NewReframeTranslatorService(backend findFunc) (*ReframeTranslatorService, error) {
+	return &ReframeTranslatorService{backend}, nil
 }
 
 type ReframeTranslatorService struct {
-	backends []*finderhttpclient.Client
+	findBackend findFunc
 }
 
 func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
 	out := make(chan drclient.FindProvidersAsyncResult)
-	wg := sync.WaitGroup{}
-	mh := key.Hash()
-	for _, c := range x.backends {
-		wg.Add(1)
-		go func(c *finderhttpclient.Client, mh multihash.Multihash) {
-			defer wg.Done()
 
-			reframeResult := drclient.FindProvidersAsyncResult{}
+	req, err := url.Parse("http://localhost-reframetranslator/multihash/" + key.Hash().String())
+	if err != nil {
+		return nil, err
+	}
 
-			results, err := c.Find(ctx, mh)
-			if err != nil {
-				reframeResult.Err = err
-			} else if results != nil {
-				for _, mhr := range results.MultihashResults {
-					for _, pr := range mhr.ProviderResults {
-						if isBitswapMetadata(pr.Metadata) {
-							reframeResult.AddrInfo = append(reframeResult.AddrInfo, pr.Provider)
-						}
-					}
+	go func() {
+		defer close(out)
+
+		respStatus, respJSON := x.findBackend(ctx, "GET", req, []byte{})
+		if respStatus == http.StatusNotFound {
+			// no responses.
+			return
+		}
+
+		outMsg := drclient.FindProvidersAsyncResult{}
+
+		if respStatus != http.StatusOK {
+			// error
+			outMsg.Err = fmt.Errorf("status %d", respStatus)
+			goto output
+		}
+
+		{
+			var parsed model.FindResponse
+			if err := json.Unmarshal(respJSON, &parsed); err != nil {
+				outMsg.Err = err
+				goto output
+			}
+
+			if len(parsed.MultihashResults) != 1 {
+				outMsg.Err = fmt.Errorf("unexpected number of multihashes: %d", len(parsed.MultihashResults))
+				goto output
+			}
+			for _, prov := range parsed.MultihashResults[0].ProviderResults {
+				if isBitswapMetadata(prov.Metadata) {
+					outMsg.AddrInfo = append(outMsg.AddrInfo, prov.Provider)
 				}
 			}
+		}
 
-			select {
-			case out <- reframeResult:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}(c, mh)
-	}
-	go func() {
-		wg.Wait()
-		close(out)
+	output:
+		select {
+		case out <- outMsg:
+			return
+		case <-ctx.Done():
+			return
+		}
 	}()
+
 	return out, nil
 }
 

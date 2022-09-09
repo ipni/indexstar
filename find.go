@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +18,25 @@ import (
 )
 
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
+	// Copy the original request body in case it is a POST batch find request.
+	rb, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		log.Warnw("failed to read original request body", "err", err)
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	rcode, resp := s.doFind(r.Context(), r.Method, r.URL, rb)
+
+	if rcode != http.StatusOK {
+		http.Error(w, "", rcode)
+		return
+	}
+	httpserver.WriteJsonResponse(w, http.StatusOK, resp)
+}
+
+func (s *server) doFind(ctx context.Context, method string, req *url.URL, body []byte) (int, []byte) {
 	start := time.Now()
 	tags := []tag.Mutator{}
 	defer func() {
@@ -27,41 +45,28 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
 	}()
 
-	// Copy the original request body in case it is a POST batch find request.
-	rb, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		tags = append(tags, tag.Insert(metrics.Found, "client_error"))
-		log.Warnw("failed to read original request body", "err", err)
-		return
-	}
-
 	sg := &scatterGather[*url.URL, *model.FindResponse]{
 		targets: s.servers,
 		maxWait: config.Server.ResultMaxWait,
 	}
 
 	count := atomic.Int32{}
-	ctx := context.Background()
 	if err := sg.scatter(ctx, func(b *url.URL) (<-chan *model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
-		endpoint := *r.URL
+		endpoint := *req
 		endpoint.Host = b.Host
 		endpoint.Scheme = b.Scheme
 		log := log.With("backend", endpoint)
 
-		// If body in original request existed, make a reader for it.
-		var body io.Reader
-		if len(rb) > 0 {
-			body = bytes.NewReader(rb)
-		}
-		req, err := http.NewRequest(r.Method, endpoint.String(), body)
+		bodyReader := bytes.NewReader(body)
+
+		req, err := http.NewRequest(method, endpoint.String(), bodyReader)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
 			return nil, err
 		}
-		req.Header.Set("X-Forwarded-Host", r.Host)
+		req.Header.Set("X-Forwarded-Host", req.Host)
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend", "err", err)
@@ -93,8 +98,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 		}
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+		return http.StatusInternalServerError, []byte{}
 	}
 
 	// TODO: stream out partial response as they come in.
@@ -106,10 +110,8 @@ outer:
 		} else {
 			if !bytes.Equal(resp.MultihashResults[0].Multihash, prov.MultihashResults[0].Multihash) {
 				// weird / invalid.
-				log.Warnw("conflicting results", "q", r.URL.Path, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
-
-				httpserver.HandleError(w, errors.New("conflicting results"), http.MethodGet)
-				continue
+				log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
+				return http.StatusInternalServerError, []byte{}
 			}
 			for _, pr := range prov.MultihashResults[0].ProviderResults {
 				for _, rr := range resp.MultihashResults[0].ProviderResults {
@@ -127,8 +129,7 @@ outer:
 
 	if resp.MultihashResults == nil {
 		tags = append(tags, tag.Insert(metrics.Found, "no"))
-		http.Error(w, "no results for query", http.StatusNotFound)
-		return
+		return http.StatusNotFound, []byte{}
 	} else {
 		tags = append(tags, tag.Insert(metrics.Found, "yes"))
 	}
@@ -137,8 +138,7 @@ outer:
 	outData, err := model.MarshalFindResponse(&resp)
 	if err != nil {
 		log.Warnw("failed marshal response", "err", err)
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+		return http.StatusInternalServerError, []byte{}
 	}
-	httpserver.WriteJsonResponse(w, http.StatusOK, outData)
+	return http.StatusOK, outData
 }
