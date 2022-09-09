@@ -86,6 +86,10 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 				res.Err = r.Err
 			}
 		}
+		// don't return both results and a partial-error.
+		if len(res.AddrInfo) != 0 {
+			res.Err = nil
+		}
 		return &res, nil
 	}); err != nil {
 		return nil, err
