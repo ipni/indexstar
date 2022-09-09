@@ -73,8 +73,24 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 		maxWait: config.Reframe.ResultMaxWait,
 	}
 
-	if err := sg.scatter(ctx, func(b *backendDelegatedRoutingClient) (<-chan drclient.FindProvidersAsyncResult, error) {
-		return b.FindProvidersAsync(ctx, key)
+	if err := sg.scatter(ctx, func(cctx context.Context, b *backendDelegatedRoutingClient) (*drclient.FindProvidersAsyncResult, error) {
+		ch, err := b.FindProvidersAsync(cctx, key)
+		if err != nil {
+			return nil, err
+		}
+
+		res := drclient.FindProvidersAsyncResult{}
+		for r := range ch {
+			res.AddrInfo = append(res.AddrInfo, r.AddrInfo...)
+			if r.Err != nil {
+				res.Err = r.Err
+			}
+		}
+		// don't return both results and a partial-error.
+		if len(res.AddrInfo) != 0 {
+			res.Err = nil
+		}
+		return &res, nil
 	}); err != nil {
 		return nil, err
 	}
