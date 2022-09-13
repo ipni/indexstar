@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/filecoin-shipyard/indexstar/httpserver"
@@ -70,7 +71,12 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 	resp := make(map[peer.ID]model.ProviderInfo)
 	for prov := range combined {
 		for _, p := range prov {
-			if _, ok := resp[p.AddrInfo.ID]; ok {
+			if curr, ok := resp[p.AddrInfo.ID]; ok {
+				clt, e1 := time.Parse(time.RFC3339, curr.LastAdvertisementTime)
+				plt, e2 := time.Parse(time.RFC3339, p.LastAdvertisementTime)
+				if e1 == nil && e2 == nil && clt.Before(plt) {
+					resp[p.AddrInfo.ID] = p
+				}
 				continue
 			}
 			resp[p.AddrInfo.ID] = p
