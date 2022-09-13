@@ -38,7 +38,7 @@ type ReframeTranslatorService struct {
 func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
 	out := make(chan drclient.FindProvidersAsyncResult)
 
-	req, err := url.Parse("http://localhost-reframetranslator/multihash/" + key.Hash().String())
+	req, err := url.Parse("http://localhost-reframetranslator/multihash/" + key.Hash().B58String())
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +76,7 @@ func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Ci
 					outMsg.AddrInfo = append(outMsg.AddrInfo, prov.Provider)
 				}
 			}
+			goto output
 		}
 
 	output:
