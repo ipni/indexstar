@@ -12,6 +12,7 @@ import (
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
 	drserver "github.com/ipfs/go-delegated-routing/server"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-varint"
@@ -71,9 +72,11 @@ func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Ci
 				outMsg.Err = fmt.Errorf("unexpected number of multihashes: %d", len(parsed.MultihashResults))
 				goto output
 			}
+			seen := make(map[peer.ID]struct{})
 			for _, prov := range parsed.MultihashResults[0].ProviderResults {
-				if isBitswapMetadata(prov.Metadata) {
+				if _, ok := seen[prov.Provider.ID]; !ok && isBitswapMetadata(prov.Metadata) {
 					outMsg.AddrInfo = append(outMsg.AddrInfo, prov.Provider)
+					seen[prov.Provider.ID] = struct{}{}
 				}
 			}
 			goto output
