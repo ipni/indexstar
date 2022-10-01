@@ -23,6 +23,7 @@ type server struct {
 	http.Client
 	net.Listener
 	metricsListener  net.Listener
+	cfgBase          string
 	servers          []*url.URL
 	serverCallers    []*circuitbreaker.CircuitBreaker
 	base             http.Handler
@@ -39,26 +40,36 @@ func NewServer(c *cli.Context) (*server, error) {
 		return nil, err
 	}
 	servers := c.StringSlice("backends")
+
+	var surls []*url.URL
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("no backends specified")
-	}
-	surls := make([]*url.URL, 0, len(servers))
-	scallers := make([]*circuitbreaker.CircuitBreaker, 0, len(servers))
-	for _, s := range servers {
-		surl, err := url.Parse(s)
-		if err != nil {
-			return nil, err
+		if !c.IsSet("config") {
+			return nil, fmt.Errorf("no backends specified")
 		}
-		surls = append(surls, surl)
-		scallers = append(scallers, circuitbreaker.New(
+		surls, err = Load(c.String("config"))
+		if err != nil {
+			return nil, fmt.Errorf("could not load backends from config: %w", err)
+		}
+	} else {
+		surls = make([]*url.URL, len(servers))
+		for i, s := range servers {
+			surls[i], err = url.Parse(s)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	scallers := make([]*circuitbreaker.CircuitBreaker, len(surls))
+	for i, surl := range surls {
+		scallers[i] = circuitbreaker.New(
 			circuitbreaker.WithFailOnContextCancel(false),
 			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
 			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
 			circuitbreaker.WithCounterResetInterval(config.Circuit.CounterReset),
 			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
-				log.Infof("circuit state for %s changed from %s to %s\n", s, from, to)
-			}),
-		))
+				log.Infof("circuit state for %s changed from %s to %s", surl.String(), from, to)
+			}))
 	}
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
@@ -72,20 +83,31 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}
-	s := server{
+
+	return &server{
 		Context: c.Context,
 		Client: http.Client{
 			Timeout:   config.Server.HttpClientTimeout,
 			Transport: t,
 		},
+		cfgBase:          c.String("config"),
 		Listener:         bound,
 		metricsListener:  mb,
 		servers:          surls,
 		serverCallers:    scallers,
 		base:             httputil.NewSingleHostReverseProxy(surls[0]),
 		translateReframe: c.Bool("translateReframe"),
+	}, nil
+}
+
+func (s *server) Reload() error {
+	surls, err := Load(s.cfgBase)
+	if err != nil {
+		return err
 	}
-	return &s, nil
+	s.servers = surls
+	s.base = httputil.NewSingleHostReverseProxy(surls[0])
+	return nil
 }
 
 func (s *server) Serve() chan error {

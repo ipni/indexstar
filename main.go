@@ -15,6 +15,11 @@ func main() {
 		Usage: "indexstar is a point in the content routing galaxy - routes requests in a star topology",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Name:      "config",
+				Usage:     "config file",
+				TakesFile: true,
+			},
+			&cli.StringFlag{
 				Name:  "listen",
 				Usage: "listen address",
 				Value: ":8080",
@@ -42,11 +47,24 @@ func main() {
 			if err != nil {
 				return err
 			}
-			select {
-			case <-exit:
-				return nil
-			case err := <-s.Serve():
-				return err
+
+			reload := make(chan os.Signal, 1)
+			signal.Notify(reload, syscall.SIGHUP)
+
+			done := s.Serve()
+
+			for {
+				select {
+				case <-exit:
+					return nil
+				case err := <-done:
+					return err
+				case <-reload:
+					err := s.Reload()
+					if err != nil {
+						log.Warnf("couldn't reload servers: %s", err)
+					}
+				}
 			}
 		},
 	}
