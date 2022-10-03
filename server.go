@@ -83,6 +83,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/multihash", s.find)
 	mux.HandleFunc("/multihash/", s.find)
 	mux.HandleFunc("/providers", s.providers)
+	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
 
 	if s.translateReframe {
