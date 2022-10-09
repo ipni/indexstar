@@ -11,6 +11,7 @@ import (
 	finderhttpclient "github.com/filecoin-project/storetheindex/api/v0/finder/client/http"
 	"github.com/ipfs/go-cid"
 	drp "github.com/ipfs/go-delegated-routing/gen/proto"
+	"github.com/mercari/go-circuitbreaker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,6 +34,7 @@ func doServe(ctx context.Context, bound net.Listener) {
 		Listener:         bound,
 		metricsListener:  b2,
 		servers:          surls,
+		serverCallers:    []*circuitbreaker.CircuitBreaker{circuitbreaker.New()},
 		base:             httputil.NewSingleHostReverseProxy(surls[0]),
 		translateReframe: true,
 	}

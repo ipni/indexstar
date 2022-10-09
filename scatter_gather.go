@@ -4,10 +4,13 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/mercari/go-circuitbreaker"
 )
 
 type scatterGather[T, R any] struct {
 	targets []T
+	tcb     []*circuitbreaker.CircuitBreaker
 	start   time.Time
 	wg      sync.WaitGroup
 	out     chan R
@@ -17,9 +20,13 @@ type scatterGather[T, R any] struct {
 func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context.Context, T) (*R, error)) error {
 	sg.start = time.Now()
 	sg.out = make(chan R, 1)
-	for _, t := range sg.targets {
+	for i, t := range sg.targets {
+		if (len(sg.tcb) > 0) && !sg.tcb[i].Ready() {
+			continue
+		}
+
 		sg.wg.Add(1)
-		go func(target T) {
+		go func(target T, i int) {
 			defer sg.wg.Done()
 
 			select {
@@ -32,6 +39,9 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 			cctx, cncl := context.WithTimeout(ctx, sg.maxWait)
 			sout, err := forEach(cctx, target)
 			cncl()
+			if len(sg.tcb) > 0 {
+				err = sg.tcb[i].Done(ctx, err)
+			}
 			if err != nil {
 				log.Errorw("failed to scatter on target", "target", target, "err", err)
 				return
@@ -47,7 +57,7 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 					}
 				}
 			}
-		}(t)
+		}(t, i)
 	}
 	go func() {
 		defer close(sg.out)

@@ -47,6 +47,7 @@ func (s *server) doFind(ctx context.Context, method string, req *url.URL, body [
 
 	sg := &scatterGather[*url.URL, *model.FindResponse]{
 		targets: s.servers,
+		tcb:     s.serverCallers,
 		maxWait: config.Server.ResultMaxWait,
 	}
 

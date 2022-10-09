@@ -12,6 +12,7 @@ import (
 	"github.com/filecoin-shipyard/indexstar/metrics"
 	logging "github.com/ipfs/go-log/v2"
 
+	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
 )
 
@@ -23,6 +24,7 @@ type server struct {
 	net.Listener
 	metricsListener  net.Listener
 	servers          []*url.URL
+	serverCallers    []*circuitbreaker.CircuitBreaker
 	base             http.Handler
 	translateReframe bool
 }
@@ -41,12 +43,22 @@ func NewServer(c *cli.Context) (*server, error) {
 		return nil, fmt.Errorf("no backends specified")
 	}
 	surls := make([]*url.URL, 0, len(servers))
+	scallers := make([]*circuitbreaker.CircuitBreaker, 0, len(servers))
 	for _, s := range servers {
 		surl, err := url.Parse(s)
 		if err != nil {
 			return nil, err
 		}
 		surls = append(surls, surl)
+		scallers = append(scallers, circuitbreaker.New(
+			circuitbreaker.WithFailOnContextCancel(false),
+			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
+			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
+			circuitbreaker.WithCounterResetInterval(config.Circuit.CounterReset),
+			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
+				log.Infof("circuit state for %s changed from %s to %s\n", s, from, to)
+			}),
+		))
 	}
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
@@ -69,6 +81,7 @@ func NewServer(c *cli.Context) (*server, error) {
 		Listener:         bound,
 		metricsListener:  mb,
 		servers:          surls,
+		serverCallers:    scallers,
 		base:             httputil.NewSingleHostReverseProxy(surls[0]),
 		translateReframe: c.Bool("translateReframe"),
 	}
