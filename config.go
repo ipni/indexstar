@@ -23,6 +23,10 @@ const (
 	defaultServerHttpClientTimeout         = 10 * time.Second
 	defaultServerResultMaxWait             = 5 * time.Second
 	defaultServerMaxRequestBodySize  int64 = 8 << 10 // 8KiB
+
+	defaultCircuitHalfOpenSuccesses = 10
+	defaultCircuitOpenTimeout       = 0
+	defaultCircuitCounterReset      = 1 * time.Second
 )
 
 var config struct {
@@ -45,6 +49,11 @@ var config struct {
 		ResultMaxWait       time.Duration
 		MaxRequestBodySize  int64
 	}
+	Circuit struct {
+		HalfOpenSuccesses int
+		OpenTimeout       time.Duration
+		CounterReset      time.Duration
+	}
 }
 
 func init() {
@@ -64,6 +73,10 @@ func init() {
 	config.Server.HttpClientTimeout = getEnvOrDefault[time.Duration]("SERVER_HTTP_CLIENT_TIMEOUT", defaultServerHttpClientTimeout)
 	config.Server.ResultMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_MAX_WAIT", defaultServerResultMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)
+
+	config.Circuit.HalfOpenSuccesses = getEnvOrDefault[int]("CIRCUIT_HALF_OPEN_SUCCESSES", defaultCircuitHalfOpenSuccesses)
+	config.Circuit.OpenTimeout = getEnvOrDefault[time.Duration]("CIRCUIT_OPEN_TIMEOUT", defaultCircuitOpenTimeout)
+	config.Circuit.CounterReset = getEnvOrDefault[time.Duration]("CIRCUIT_COUNTER_RESET", defaultCircuitCounterReset)
 }
 
 func getEnvOrDefault[T any](key string, def T) T {
