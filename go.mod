@@ -10,6 +10,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p-core v0.19.1
 	github.com/mercari/go-circuitbreaker v0.0.2
+	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multicodec v0.5.0
 	github.com/multiformats/go-varint v0.0.6
 	github.com/prometheus/client_golang v1.12.1
