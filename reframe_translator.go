@@ -97,7 +97,11 @@ func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Ci
 var BitswapMetadataBytes = varint.ToUvarint(uint64(multicodec.TransportBitswap))
 
 func isBitswapMetadata(meta []byte) bool {
-	return bytes.Equal(meta, BitswapMetadataBytes)
+	// Metadata must be sorted according to the specification; see:
+	// - https://github.com/filecoin-project/index-provider/blob/main/metadata/metadata.go#L143
+	// This implies that if it includes Bitswap, its codec must appear at the beginning
+	// of the metadata value. Hence, bytes.HasPrefix.
+	return bytes.HasPrefix(meta, BitswapMetadataBytes)
 }
 
 func (x *ReframeTranslatorService) GetIPNS(context.Context, []byte) (<-chan drclient.GetIPNSAsyncResult, error) {
