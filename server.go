@@ -138,6 +138,15 @@ func (s *server) Serve() chan error {
 		}
 		mux.HandleFunc("/reframe", reframe)
 	}
+
+	delegated, err := NewDelegatedTranslator(s.doFind)
+	if err != nil {
+		ec <- err
+		close(ec)
+		return ec
+	}
+	mux.Handle("/v1", delegated)
+
 	mux.Handle("/", s)
 
 	serv := http.Server{

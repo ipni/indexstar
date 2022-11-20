@@ -10,7 +10,7 @@ import (
 
 	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/filecoin-shipyard/indexstar/httpserver"
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func (s *server) providers(w http.ResponseWriter, r *http.Request) {

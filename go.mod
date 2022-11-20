@@ -4,13 +4,17 @@ go 1.19
 
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
+	github.com/filecoin-project/index-provider v0.9.1
+	github.com/ipfs/go-cid v0.3.2
+	github.com/ipfs/go-delegated-routing v0.6.0
 	github.com/filecoin-project/storetheindex v0.5.3-0.20221130190459-210021f61299
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-delegated-routing v0.6.0
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/libp2p/go-libp2p-core v0.20.1
+	github.com/libp2p/go-libp2p v0.23.2
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/multiformats/go-multiaddr v0.7.0
 	github.com/multiformats/go-multicodec v0.6.0
 	github.com/multiformats/go-varint v0.0.6
 	github.com/prometheus/client_golang v1.13.0
@@ -40,6 +44,10 @@ require (
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-libp2p v0.23.2 // indirect
+	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
+	github.com/libp2p/go-openssl v0.1.0 // indirect
+	github.com/mattn/go-isatty v0.0.16 // indirect
+	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
 	github.com/libp2p/go-openssl v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
