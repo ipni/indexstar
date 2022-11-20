@@ -114,10 +114,6 @@ func main() {
 					}
 				}
 			}
-			if ticker != nil {
-				ticker.Stop()
-			}
-			return nil
 		},
 	}
 	err := app.Run(os.Args)
