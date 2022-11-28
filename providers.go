@@ -155,7 +155,9 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	resp := model.ProviderInfo{}
+	var count int
 	for p := range combined {
+		count++
 		if resp.LastAdvertisementTime != "" {
 			clt, e1 := time.Parse(time.RFC3339, resp.LastAdvertisementTime)
 			plt, e2 := time.Parse(time.RFC3339, p.LastAdvertisementTime)
@@ -165,6 +167,11 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resp = p
+	}
+
+	if count == 0 {
+		http.Error(w, "", http.StatusNotFound)
+		return
 	}
 
 	// Write out combined.
