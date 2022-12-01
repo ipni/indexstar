@@ -12,8 +12,8 @@ import (
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
 	drserver "github.com/ipfs/go-delegated-routing/server"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-varint"
 )
