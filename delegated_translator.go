@@ -67,7 +67,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			out.Providers = append(out.Providers, drProvider{
 				Protocol: "unknown",
-				Peer:     p.Provider.ID,
+				ID:       p.Provider.ID,
 				Addrs:    p.Provider.Addrs,
 			})
 		} else {
@@ -76,7 +76,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 				plb, _ := pl.MarshalBinary()
 				out.Providers = append(out.Providers, drProvider{
 					Protocol: proto.String(),
-					Peer:     p.Provider.ID,
+					ID:       p.Provider.ID,
 					Addrs:    p.Provider.Addrs,
 					Metadata: plb,
 				})
@@ -99,7 +99,7 @@ type drResp struct {
 
 type drProvider struct {
 	Protocol string
-	Peer     peer.ID
+	ID       peer.ID
 	Addrs    []multiaddr.Multiaddr
 	Metadata []byte `json:",omitempty"`
 }

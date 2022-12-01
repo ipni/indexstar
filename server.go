@@ -145,7 +145,7 @@ func (s *server) Serve() chan error {
 		close(ec)
 		return ec
 	}
-	mux.Handle("/v1", delegated)
+	mux.Handle("/routing/v1", delegated)
 
 	mux.Handle("/", s)
 
