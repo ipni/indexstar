@@ -35,7 +35,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
-	h.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte{})
