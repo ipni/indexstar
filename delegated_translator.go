@@ -33,6 +33,15 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h := w.Header()
+	h.Add("Access-Control-Allow-Origin", "*")
+	h.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte{})
+		return
+	}
+
 	// translate URL
 
 	rcode, resp := dt.be(r.Context(), "GET", r.URL, []byte{})
