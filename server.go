@@ -145,7 +145,8 @@ func (s *server) Serve() chan error {
 		close(ec)
 		return ec
 	}
-	mux.Handle("/routing/v1", delegated)
+	// Strip prefix URI since DelegatedTranslator uses a nested mux.
+	mux.Handle("/routing/v1/", http.StripPrefix("/routing/v1", delegated))
 
 	mux.Handle("/", s)
 

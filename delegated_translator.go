@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
@@ -42,9 +44,19 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// translate URL
-
-	rcode, resp := dt.be(r.Context(), "GET", r.URL, []byte{})
+	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
+	cidUrlParam := strings.TrimPrefix(r.URL.Path, "/providers/")
+	findByCid, err := url.JoinPath("/", "cid", cidUrlParam)
+	if err != nil {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	uri, err := url.ParseRequestURI(findByCid)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+	rcode, resp := dt.be(r.Context(), "GET", uri, []byte{})
 
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
