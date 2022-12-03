@@ -5,8 +5,6 @@ go 1.19
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
 	github.com/filecoin-project/index-provider v0.9.1
-	github.com/ipfs/go-cid v0.3.2
-	github.com/ipfs/go-delegated-routing v0.6.0
 	github.com/filecoin-project/storetheindex v0.5.3-0.20221130190459-210021f61299
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-delegated-routing v0.6.0
@@ -43,11 +41,6 @@ require (
 	github.com/ipld/go-ipld-prime v0.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
-	github.com/libp2p/go-libp2p v0.23.2 // indirect
-	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
-	github.com/libp2p/go-openssl v0.1.0 // indirect
-	github.com/mattn/go-isatty v0.0.16 // indirect
-	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/libp2p/go-libp2p-core v0.20.1 // indirect
 	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
 	github.com/libp2p/go-openssl v0.1.0 // indirect
@@ -58,7 +51,6 @@ require (
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.1.0 // indirect
-	github.com/multiformats/go-multiaddr v0.7.0 // indirect
 	github.com/multiformats/go-multibase v0.1.1 // indirect
 	github.com/multiformats/go-multihash v0.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
