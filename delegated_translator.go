@@ -56,7 +56,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	rcode, resp := dt.be(r.Context(), "GET", uri, []byte{})
+	rcode, resp := dt.be(r.Context(), "GET", findMethodDelegated, uri, []byte{})
 
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)

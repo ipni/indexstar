@@ -17,6 +17,12 @@ import (
 	"go.opencensus.io/tag"
 )
 
+const (
+	findMethodOrig      = "http-v0"
+	findMethodReframe   = "reframe-v1"
+	findMethodDelegated = "delegated-v1"
+)
+
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	// Copy the original request body in case it is a POST batch find request.
 	rb, err := io.ReadAll(r.Body)
@@ -27,7 +33,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rcode, resp := s.doFind(r.Context(), r.Method, r.URL, rb)
+	rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb)
 
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
@@ -36,13 +42,17 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJsonResponse(w, http.StatusOK, resp)
 }
 
-func (s *server) doFind(ctx context.Context, method string, req *url.URL, body []byte) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte) (int, []byte) {
 	start := time.Now()
-	tags := []tag.Mutator{}
+	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
+	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
 	defer func() {
 		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(tags...),
+			stats.WithTags(latencyTags...),
 			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(loadTags...),
+			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
 
 	sg := &scatterGather[*url.URL, *model.FindResponse]{
@@ -126,10 +136,10 @@ outer:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(count.Load()))))
 
 	if resp.MultihashResults == nil {
-		tags = append(tags, tag.Insert(metrics.Found, "no"))
+		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		return http.StatusNotFound, []byte{}
 	} else {
-		tags = append(tags, tag.Insert(metrics.Found, "yes"))
+		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
 	}
 
 	// write out combined.

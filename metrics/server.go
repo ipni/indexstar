@@ -28,6 +28,7 @@ var (
 var (
 	FindLatency  = stats.Float64("indexstar/find/latency", "Time to respond to a find request", stats.UnitMilliseconds)
 	FindBackends = stats.Float64("indexstar/find/backends", "Backends reachd in a find request", stats.UnitDimensionless)
+	FindLoad     = stats.Int64("indexstar/find/load", "Amount of calls to find", stats.UnitDimensionless)
 )
 
 // Views
@@ -41,6 +42,11 @@ var (
 		Measure:     FindBackends,
 		Aggregation: view.LastValue(),
 	}
+	findLoadView = &view.View{
+		Measure:     FindLoad,
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{Method},
+	}
 )
 
 // Start creates an HTTP router for serving metric info
@@ -49,6 +55,7 @@ func Start(views []*view.View) http.Handler {
 	err := view.Register(
 		findLatencyView,
 		findBackendView,
+		findLoadView,
 	)
 	if err != nil {
 		log.Errorf("cannot register metrics default views: %s", err)
