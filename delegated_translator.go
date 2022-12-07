@@ -12,6 +12,12 @@ import (
 	"github.com/filecoin-shipyard/indexstar/httpserver"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multicodec"
+)
+
+const (
+	unknownProtocol = "unknown"
+	unknownSchema   = unknownProtocol
 )
 
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
@@ -87,7 +93,8 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		err := md.UnmarshalBinary(p.Metadata)
 		if err != nil {
 			out.Providers = append(out.Providers, drProvider{
-				Protocol: "unknown",
+				Protocol: unknownProtocol,
+				Schema:   unknownSchema,
 				ID:       p.Provider.ID,
 				Addrs:    p.Provider.Addrs,
 			})
@@ -97,6 +104,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 				plb, _ := pl.MarshalBinary()
 				out.Providers = append(out.Providers, drProvider{
 					Protocol: proto.String(),
+					Schema:   schemaByProtocolID(proto),
 					ID:       p.Provider.ID,
 					Addrs:    p.Provider.Addrs,
 					Metadata: plb,
@@ -114,12 +122,24 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJsonResponse(w, http.StatusOK, outBytes)
 }
 
+func schemaByProtocolID(p multicodec.Code) string {
+	switch p {
+	case multicodec.TransportBitswap:
+		return "bitswap"
+	case multicodec.TransportGraphsyncFilecoinv1:
+		return "graphsync-filecoinv1"
+	default:
+		return unknownProtocol
+	}
+}
+
 type drResp struct {
 	Providers []drProvider
 }
 
 type drProvider struct {
 	Protocol string
+	Schema   string
 	ID       peer.ID
 	Addrs    []multiaddr.Multiaddr
 	Metadata []byte `json:",omitempty"`
