@@ -95,8 +95,16 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 			for _, proto := range md.Protocols() {
 				pl := md.Get(proto)
 				plb, _ := pl.MarshalBinary()
+				proto := proto.String()
+
+				// per https://github.com/ipni/indexstar/issues/50
+				// IPIP-337 uses non-canonical naming of the bitswap-transport multicodec.
+				if proto == "transport-bitswap" {
+					proto = "bitswap"
+				}
+
 				out.Providers = append(out.Providers, drProvider{
-					Protocol: proto.String(),
+					Protocol: proto,
 					ID:       p.Provider.ID,
 					Addrs:    p.Provider.Addrs,
 					Metadata: plb,
