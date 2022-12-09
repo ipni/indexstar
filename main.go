@@ -73,7 +73,7 @@ func main() {
 				ticker = time.NewTicker(configCheckInterval)
 				timeChan = ticker.C
 
-				cfgPath := s.cfgBase
+				cfgPath = s.cfgBase
 				if cfgPath == "" {
 					cfgPath, err = Filename("")
 					if err != nil {
