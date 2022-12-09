@@ -61,7 +61,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		maxWait: config.Server.ResultMaxWait,
 	}
 
-	count := atomic.Int32{}
+	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (**model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
@@ -92,14 +92,14 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			_ = count.Add(1)
+			atomic.AddInt32(&count, 1)
 			providers, err := model.UnmarshalFindResponse(data)
 			if err != nil {
 				return nil, err
 			}
 			return &providers, nil
 		case http.StatusNotFound:
-			_ = count.Add(1)
+			atomic.AddInt32(&count, 1)
 			return nil, nil
 		default:
 			return nil, fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.String())
@@ -133,7 +133,7 @@ outer:
 	}
 
 	_ = stats.RecordWithOptions(context.Background(),
-		stats.WithMeasurements(metrics.FindBackends.M(float64(count.Load()))))
+		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if resp.MultihashResults == nil {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
