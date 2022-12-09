@@ -1,6 +1,6 @@
 module github.com/filecoin-shipyard/indexstar
 
-go 1.19
+go 1.18
 
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0

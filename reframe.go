@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
@@ -30,7 +31,8 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 
 	clients := make([]*backendDelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
-		endpoint := b.JoinPath("reframe").String()
+		// TODO: replace with URL.JoinPath once upgraded to go 1.19
+		endpoint := path.Join(b.String(), "reframe")
 		q, err := drproto.New_DelegatedRouting_Client(endpoint, drproto.DelegatedRouting_Client_WithHTTPClient(&httpClient))
 		if err != nil {
 			return nil, err

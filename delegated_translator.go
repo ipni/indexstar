@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
@@ -52,7 +53,8 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 
 	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
 	cidUrlParam := strings.TrimPrefix(r.URL.Path, "/providers/")
-	findByCid, err := url.JoinPath("/", "cid", cidUrlParam)
+	// TODO: replace with URL.JoinPath once upgraded to go 1.19
+	findByCid := path.Join("/cid", cidUrlParam)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
