@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,9 +12,12 @@ import (
 	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/filecoin-shipyard/indexstar/httpserver"
+	"github.com/filecoin-shipyard/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 )
 
 const (
@@ -33,12 +37,21 @@ type delegatedTranslator struct {
 }
 
 func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
+	_ = stats.RecordWithOptions(context.Background(),
+		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
+		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
+
 	// read out / close the request body.
 	_, err := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
 		log.Warnw("failed to read original request body", "err", err)
 		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	if r.Method == http.MethodPut {
+		http.Error(w, "", http.StatusNotImplemented)
 		return
 	}
 
@@ -64,7 +77,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	rcode, resp := dt.be(r.Context(), "GET", findMethodDelegated, uri, []byte{})
+	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{})
 
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
