@@ -28,12 +28,30 @@ const (
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	finder := delegatedTranslator{backend}
 	m := http.NewServeMux()
+	m.HandleFunc("/providers", finder.provide)
 	m.HandleFunc("/providers/", finder.find)
 	return m, nil
 }
 
 type delegatedTranslator struct {
 	be findFunc
+}
+
+func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
+	_ = stats.RecordWithOptions(context.Background(),
+		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
+		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
+
+	h := w.Header()
+	h.Add("Access-Control-Allow-Origin", "*")
+	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte{})
+		return
+	}
+
+	http.Error(w, "", http.StatusNotImplemented)
 }
 
 func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
@@ -50,17 +68,17 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == http.MethodPut {
-		http.Error(w, "", http.StatusNotImplemented)
-		return
-	}
-
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
 	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte{})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "", http.StatusNotImplemented)
 		return
 	}
 
