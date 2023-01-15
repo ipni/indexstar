@@ -8,9 +8,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	"github.com/filecoin-shipyard/indexstar/httpserver"
-	"github.com/filecoin-shipyard/indexstar/metrics"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/indexstar/metrics"
 
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"

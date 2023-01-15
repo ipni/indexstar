@@ -1,6 +1,6 @@
 ## Indexstar ⭐️
 
-Indexstar is a load splitter for [storetheindex](https://github.com/filecoin-project/storetheindex/).
+Indexstar is a load splitter for [storetheindex](https://github.com/ipni/storetheindex/).
 Inbound requests to an indexstar can query multiple storetheindex nodes and return the union of discovered results.
 
 ### Usage
