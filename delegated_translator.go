@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
-	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
-	"github.com/filecoin-shipyard/indexstar/httpserver"
-	"github.com/filecoin-shipyard/indexstar/metrics"
+	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/indexstar/metrics"
+	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"

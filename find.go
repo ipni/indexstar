@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
-	"github.com/filecoin-shipyard/indexstar/httpserver"
-	"github.com/filecoin-shipyard/indexstar/metrics"
+	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/indexstar/metrics"
+	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -113,21 +113,35 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	var resp model.FindResponse
 outer:
 	for prov := range sg.gather(ctx) {
-		if resp.MultihashResults == nil {
-			resp.MultihashResults = prov.MultihashResults
-		} else {
-			if !bytes.Equal(resp.MultihashResults[0].Multihash, prov.MultihashResults[0].Multihash) {
-				// weird / invalid.
-				log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
-				return http.StatusInternalServerError, []byte{}
-			}
-			for _, pr := range prov.MultihashResults[0].ProviderResults {
-				for _, rr := range resp.MultihashResults[0].ProviderResults {
-					if bytes.Equal(rr.ContextID, pr.ContextID) && bytes.Equal([]byte(rr.Provider.ID), []byte(pr.Provider.ID)) {
-						continue outer
-					}
+		if len(prov.MultihashResults) > 0 {
+			if resp.MultihashResults == nil {
+				resp.MultihashResults = prov.MultihashResults
+			} else {
+				if !bytes.Equal(resp.MultihashResults[0].Multihash, prov.MultihashResults[0].Multihash) {
+					// weird / invalid.
+					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
+					return http.StatusInternalServerError, []byte{}
 				}
-				resp.MultihashResults[0].ProviderResults = append(resp.MultihashResults[0].ProviderResults, pr)
+				for _, pr := range prov.MultihashResults[0].ProviderResults {
+					for _, rr := range resp.MultihashResults[0].ProviderResults {
+						if bytes.Equal(rr.ContextID, pr.ContextID) && bytes.Equal([]byte(rr.Provider.ID), []byte(pr.Provider.ID)) {
+							continue outer
+						}
+					}
+					resp.MultihashResults[0].ProviderResults = append(resp.MultihashResults[0].ProviderResults, pr)
+				}
+			}
+		}
+
+		if len(prov.EncryptedMultihashResults) > 0 {
+			if resp.EncryptedMultihashResults == nil {
+				resp.EncryptedMultihashResults = prov.EncryptedMultihashResults
+			} else {
+				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, prov.EncryptedMultihashResults[0].Multihash) {
+					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", prov.EncryptedMultihashResults[0].Multihash)
+					return http.StatusInternalServerError, []byte{}
+				}
+				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, prov.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
 		}
 	}

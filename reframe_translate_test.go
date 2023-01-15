@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"testing"
 
-	finderhttpclient "github.com/filecoin-project/storetheindex/api/v0/finder/client/http"
 	"github.com/ipfs/go-cid"
 	drp "github.com/ipfs/go-delegated-routing/gen/proto"
+	finderhttpclient "github.com/ipni/storetheindex/api/v0/finder/client/http"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/stretchr/testify/require"
 )

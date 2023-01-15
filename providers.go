@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
-	"github.com/filecoin-shipyard/indexstar/httpserver"
+	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

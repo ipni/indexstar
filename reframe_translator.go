@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/filecoin-project/storetheindex/api/v0/finder/model"
 	"github.com/ipfs/go-cid"
 	drclient "github.com/ipfs/go-delegated-routing/client"
 	drserver "github.com/ipfs/go-delegated-routing/server"
+	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
