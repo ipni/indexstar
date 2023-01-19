@@ -23,18 +23,58 @@ const (
 	findMethodDelegated = "delegated-v1"
 )
 
+func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.find(w, r)
+	default:
+		discardBody(r)
+		http.Error(w, "", http.StatusNotFound)
+	}
+}
+
+func (s *server) findMultihash(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.find(w, r)
+	default:
+		discardBody(r)
+		http.Error(w, "", http.StatusNotFound)
+	}
+}
+
+func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.find(w, r)
+	default:
+		discardBody(r)
+		http.Error(w, "", http.StatusNotFound)
+	}
+}
+
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
-	// Copy the original request body in case it is a POST batch find request.
-	rb, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		log.Warnw("failed to read original request body", "err", err)
-		http.Error(w, "", http.StatusBadRequest)
+	var rb []byte
+	switch r.Method {
+	case http.MethodGet:
+		discardBody(r)
+	case http.MethodPost:
+		// Copy the original request body in case it is a POST batch find request.
+		var err error
+		rb, err = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			log.Warnw("Failed to read original request body", "err", err)
+			http.Error(w, "", http.StatusBadRequest)
+			return
+		}
+	default:
+		discardBody(r)
+		http.Error(w, "", http.StatusNotFound)
 		return
 	}
 
 	rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb)
-
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
 		return
@@ -163,4 +203,9 @@ outer:
 		return http.StatusInternalServerError, []byte{}
 	}
 	return http.StatusOK, outData
+}
+
+func discardBody(r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
 }

@@ -114,9 +114,9 @@ func (s *server) Serve() chan error {
 	ec := make(chan error)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/cid/", s.find)
-	mux.HandleFunc("/multihash", s.find)
-	mux.HandleFunc("/multihash/", s.find)
+	mux.HandleFunc("/cid/", s.findCid)
+	mux.HandleFunc("/multihash", s.findMultihash)
+	mux.HandleFunc("/multihash/", s.findMultihashSubtree)
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
@@ -189,6 +189,11 @@ func (s *server) Serve() chan error {
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	discardBody(r)
+	if r.Method != http.MethodGet {
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
 	httpserver.WriteJsonResponse(w, http.StatusOK, []byte("ready"))
 }
 

@@ -14,6 +14,12 @@ import (
 )
 
 func (s *server) providers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		discardBody(r)
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+
 	combined := make(chan []model.ProviderInfo)
 	wg := sync.WaitGroup{}
 	var err error

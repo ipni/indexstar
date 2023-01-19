@@ -42,16 +42,18 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
 		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
 
+	discardBody(r)
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
 	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
-	if r.Method == http.MethodOptions {
+	switch r.Method {
+	case http.MethodOptions:
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte{})
-		return
+	case http.MethodPut:
+		http.Error(w, "", http.StatusNotImplemented)
+	default:
+		http.Error(w, "", http.StatusNotFound)
 	}
-
-	http.Error(w, "", http.StatusNotImplemented)
 }
 
 func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
@@ -70,15 +72,14 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
-	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
-	if r.Method == http.MethodOptions {
+	h.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+	switch r.Method {
+	case http.MethodOptions:
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte{})
 		return
-	}
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "", http.StatusNotImplemented)
+	case http.MethodGet:
+	default:
+		http.Error(w, "", http.StatusNotFound)
 		return
 	}
 
