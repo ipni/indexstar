@@ -8,7 +8,7 @@ require (
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-delegated-routing v0.7.0
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/ipni/storetheindex v0.5.5-0.20230116124338-ff6fb7e515a7
+	github.com/ipni/storetheindex v0.5.8-0.20230120185258-9e604e71c49e
 	github.com/libp2p/go-libp2p v0.23.4
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/mitchellh/go-homedir v1.1.0
@@ -39,7 +39,7 @@ require (
 	github.com/ipfs/go-ipns v0.3.0 // indirect
 	github.com/ipld/edelweiss v0.2.0 // indirect
 	github.com/ipld/go-ipld-prime v0.19.0 // indirect
-	github.com/ipni/go-indexer-core v0.6.20-0.20230112154735-7b53be959fe6 // indirect
+	github.com/ipni/go-indexer-core v0.7.1-0.20230120184340-38cba41d97e3 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.1 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-libp2p-record v0.2.0 // indirect
@@ -69,7 +69,6 @@ require (
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.3.0 // indirect
-	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db // indirect
 	golang.org/x/sys v0.3.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
