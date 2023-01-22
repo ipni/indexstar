@@ -146,7 +146,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		}
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
-		return http.StatusInternalServerError, []byte{}
+		return http.StatusInternalServerError, nil
 	}
 
 	// TODO: stream out partial response as they come in.
@@ -160,7 +160,7 @@ outer:
 				if !bytes.Equal(resp.MultihashResults[0].Multihash, prov.MultihashResults[0].Multihash) {
 					// weird / invalid.
 					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
-					return http.StatusInternalServerError, []byte{}
+					return http.StatusInternalServerError, nil
 				}
 				for _, pr := range prov.MultihashResults[0].ProviderResults {
 					for _, rr := range resp.MultihashResults[0].ProviderResults {
@@ -179,7 +179,7 @@ outer:
 			} else {
 				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, prov.EncryptedMultihashResults[0].Multihash) {
 					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", prov.EncryptedMultihashResults[0].Multihash)
-					return http.StatusInternalServerError, []byte{}
+					return http.StatusInternalServerError, nil
 				}
 				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, prov.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
@@ -189,9 +189,9 @@ outer:
 	_ = stats.RecordWithOptions(context.Background(),
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
-	if resp.MultihashResults == nil {
+	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
-		return http.StatusNotFound, []byte{}
+		return http.StatusNotFound, nil
 	} else {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
 	}
@@ -200,7 +200,7 @@ outer:
 	outData, err := model.MarshalFindResponse(&resp)
 	if err != nil {
 		log.Warnw("failed marshal response", "err", err)
-		return http.StatusInternalServerError, []byte{}
+		return http.StatusInternalServerError, nil
 	}
 	return http.StatusOK, outData
 }
