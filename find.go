@@ -53,6 +53,85 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
+	discardBody(r)
+	if r.Method != http.MethodGet {
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+
+	ctx := r.Context()
+	method := r.Method
+	req := r.URL
+
+	sg := &scatterGather[*url.URL, []byte]{
+		targets: s.servers,
+		tcb:     s.serverCallers,
+		maxWait: config.Server.ResultMaxWait,
+	}
+
+	// TODO: wait for the first successfull response instead
+	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*[]byte, error) {
+		// Copy the URL from original request and override host/schema to point
+		// to the server.
+		endpoint := *req
+		endpoint.Host = b.Host
+		endpoint.Scheme = b.Scheme
+		log := log.With("backend", endpoint)
+
+		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
+		if err != nil {
+			log.Warnw("Failed to construct find-metadata backend query", "err", err)
+			return nil, err
+		}
+		req.Header.Set("X-Forwarded-Host", req.Host)
+		resp, err := s.Client.Do(req)
+		if err != nil {
+			log.Warnw("Failed to query backend for metadata", "err", err)
+			return nil, err
+		}
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Warnw("Failed to read find-metadata backend response", "err", err)
+			return nil, err
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			return &data, nil
+		case http.StatusNotFound:
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.String())
+		}
+	}); err != nil {
+		log.Errorw("Failed to scatter HTTP find metadata request", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	var res []byte
+	for md := range sg.gather(ctx) {
+		if len(md) == 0 {
+			continue
+		}
+		// It's ok to return the first encountered metadata. This is because metadata is uniquely identified
+		// by ValueKey (peerID + contextID). I.e. it's not possible to have different metadata records for the same ValueKey.
+		// In comparison to regular find requests where it's perfectly normal to have different results returned by different IPNI
+		// instances and hence they need to be aggregated.
+		res = md
+		// Continue to iterate to drain channels and avoid memory leak.
+	}
+
+	if len(res) == 0 {
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+
+	httpserver.WriteJsonResponse(w, http.StatusOK, res)
+}
+
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	var rb []byte
 	switch r.Method {
