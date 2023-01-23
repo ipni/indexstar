@@ -117,6 +117,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/cid/", s.findCid)
 	mux.HandleFunc("/multihash", s.findMultihash)
 	mux.HandleFunc("/multihash/", s.findMultihashSubtree)
+	mux.HandleFunc("/metadata/", s.findMetadataSubtree)
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
