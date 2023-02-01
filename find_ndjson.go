@@ -58,7 +58,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 	sg := &scatterGather[*url.URL, any]{
 		targets: s.servers,
 		tcb:     s.serverCallers,
-		maxWait: config.Server.ResultMaxWait,
+		maxWait: config.Server.ResultStreamMaxWait,
 	}
 
 	resultsChan := make(chan *model.ProviderResult, 1)
