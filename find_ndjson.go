@@ -62,7 +62,6 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 	}
 
 	resultsChan := make(chan *model.ProviderResult, 1)
-	defer close(resultsChan)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*any, error) {
 		// Copy the URL from original request and override host/schema to point
@@ -137,7 +136,10 @@ LOOP:
 		select {
 		case <-ctx.Done():
 			break LOOP
-		case <-sg.gather(ctx):
+		case _, ok := <-sg.gather(ctx):
+			if !ok {
+				close(resultsChan)
+			}
 		case result, ok := <-resultsChan:
 			if !ok {
 				break LOOP
