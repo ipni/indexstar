@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"net/http"
 	"net/url"
 	"sync/atomic"
@@ -55,14 +55,16 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
 
-	sg := &scatterGather[*url.URL, *model.ProviderResult]{
+	sg := &scatterGather[*url.URL, any]{
 		targets: s.servers,
 		tcb:     s.serverCallers,
 		maxWait: config.Server.ResultMaxWait,
 	}
 
+	resultsChan := make(chan *model.ProviderResult, 1)
+	defer close(resultsChan)
 	var count int32
-	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (**model.ProviderResult, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*any, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
@@ -76,38 +78,46 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 			return nil, err
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set("Accept", mediaTypeNDJson)
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend", "err", err)
 			return nil, err
 		}
 		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			var result model.ProviderResult
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			switch resp.StatusCode {
+			case http.StatusOK:
+				atomic.AddInt32(&count, 1)
+				if err := json.Unmarshal(line, &result); err != nil {
+					return nil, err
+				}
+				// Sanity check the results in case backends don't respect accept media types;
+				// see: https://github.com/ipni/storetheindex/issues/1209
+				if result.Provider.ID == "" || len(result.Provider.Addrs) == 0 {
+					return nil, nil
+				}
+				resultsChan <- &result
+				continue
+			case http.StatusNotFound:
+				atomic.AddInt32(&count, 1)
+				return nil, nil
+			default:
+				return nil, fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.String())
+			}
+		}
+		if err := scanner.Err(); err != nil {
 			log.Warnw("Failed to read backend response", "err", err)
 			return nil, err
 		}
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			atomic.AddInt32(&count, 1)
-			var result model.ProviderResult
-			if err := json.Unmarshal(data, &result); err != nil {
-				return nil, err
-			}
-			// Sanity check the results in case backends don't respect accept media types;
-			// see: https://github.com/ipni/storetheindex/issues/1209
-			if result.Provider.ID == "" || len(result.Provider.Addrs) == 0 {
-				return nil, nil
-			}
-			p := &result
-			return &p, nil
-		case http.StatusNotFound:
-			atomic.AddInt32(&count, 1)
-			return nil, nil
-		default:
-			return nil, fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.String())
-		}
+		return nil, nil
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
@@ -121,24 +131,34 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 	flusher, flushable := w.(http.Flusher)
 	encoder := json.NewEncoder(w)
 	results := newResultSet()
-	for result := range sg.gather(ctx) {
-		absent := results.putIfAbsent(result)
-		if !absent {
-			continue
-		}
-		if err := encoder.Encode(result); err != nil {
-			log.Errorw("failed to encode streaming result", "result", result, "err", err)
-			continue
-		}
-		if _, err := w.Write(newline); err != nil {
-			log.Errorw("failed to write newline while streaming results", "result", result, "err", err)
-			continue
-		}
 
-		// TODO: optimise the number of time we call flush based on some time-based or result
-		//       count heuristic.
-		if flushable {
-			flusher.Flush()
+LOOP:
+	for {
+		select {
+		case <-ctx.Done():
+			break LOOP
+		case <-sg.gather(ctx):
+		case result, ok := <-resultsChan:
+			if !ok {
+				break LOOP
+			}
+			absent := results.putIfAbsent(result)
+			if !absent {
+				continue
+			}
+			if err := encoder.Encode(result); err != nil {
+				log.Errorw("failed to encode streaming result", "result", result, "err", err)
+				continue
+			}
+			if _, err := w.Write(newline); err != nil {
+				log.Errorw("failed to write newline while streaming results", "result", result, "err", err)
+				continue
+			}
+			// TODO: optimise the number of time we call flush based on some time-based or result
+			//       count heuristic.
+			if flushable {
+				flusher.Flush()
+			}
 		}
 	}
 	_ = stats.RecordWithOptions(context.Background(),
