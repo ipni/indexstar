@@ -70,7 +70,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		maxWait: config.Server.ResultMaxWait,
 	}
 
-	// TODO: wait for the first successfull response instead
+	// TODO: wait for the first successful response instead
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*[]byte, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
@@ -133,11 +133,22 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) find(w http.ResponseWriter, r *http.Request) {
+	acc, err := getAccepts(r)
+	if err != nil {
+		discardBody(r)
+		http.Error(w, "invalid Accept header", http.StatusBadRequest)
+		return
+	}
 	var rb []byte
 	switch r.Method {
 	case http.MethodGet:
 		discardBody(r)
 	case http.MethodPost:
+		if !acc.json && !acc.any && acc.acceptHeaderFound {
+			// Only non-streaming JSON is supported for POST requests.
+			http.Error(w, "unsupported media type", http.StatusBadRequest)
+			return
+		}
 		// Copy the original request body in case it is a POST batch find request.
 		var err error
 		rb, err = io.ReadAll(r.Body)
@@ -152,13 +163,26 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
+	ctx := r.Context()
 
-	rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb)
-	if rcode != http.StatusOK {
-		http.Error(w, "", rcode)
-		return
+	// Use NDJSON response only when the request explicitly accepts it. Otherwise, fallback on
+	// JSON unless only unsupported media types are specified.
+	switch {
+	case acc.ndjson:
+		s.doFindNDJson(ctx, w, r.Method, findMethodOrig, r.URL)
+	case acc.json || acc.any || !acc.acceptHeaderFound:
+		// In a case where the request has no `Accept` header at all, be forgiving and respond with
+		// JSON.
+		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb)
+		if rcode != http.StatusOK {
+			http.Error(w, "", rcode)
+			return
+		}
+		httpserver.WriteJsonResponse(w, http.StatusOK, resp)
+	default:
+		// The request must have  specified an explicit media type that we do not support.
+		http.Error(w, "unsupported media type", http.StatusBadRequest)
 	}
-	httpserver.WriteJsonResponse(w, http.StatusOK, resp)
 }
 
 func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte) (int, []byte) {
