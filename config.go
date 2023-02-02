@@ -21,15 +21,16 @@ const (
 	defaultReframeHttpClientTimeout   = 10 * time.Second
 	defaultReframeResultMaxWait       = 5 * time.Second
 
-	defaultServerMaxIdleConns              = 100
-	defaultServerMaxConnsPerHost           = 100
-	defaultServerMaxIdleConnsPerHost       = 100
-	defaultServerDialerTimeout             = 10 * time.Second
-	defaultServerDialerKeepAlive           = 15 * time.Second
-	defaultServerHttpClientTimeout         = 30 * time.Second
-	defaultServerResultMaxWait             = 5 * time.Second
-	defaultServerResultStreamMaxWait       = 20 * time.Second
-	defaultServerMaxRequestBodySize  int64 = 8 << 10 // 8KiB
+	defaultServerMaxIdleConns               = 100
+	defaultServerMaxConnsPerHost            = 100
+	defaultServerMaxIdleConnsPerHost        = 100
+	defaultServerDialerTimeout              = 10 * time.Second
+	defaultServerDialerKeepAlive            = 15 * time.Second
+	defaultServerHttpClientTimeout          = 30 * time.Second
+	defaultServerResultMaxWait              = 5 * time.Second
+	defaultServerResultStreamMaxWait        = 20 * time.Second
+	defaultServerMaxRequestBodySize  int64  = 8 << 10 // 8KiB
+	defaultServerCascadeLabels       string = ""      // 8KiB
 
 	defaultCircuitHalfOpenSuccesses = 10
 	defaultCircuitOpenTimeout       = 0
@@ -65,6 +66,7 @@ var config struct {
 		ResultMaxWait       time.Duration
 		ResultStreamMaxWait time.Duration
 		MaxRequestBodySize  int64
+		CascadeLabels       string
 	}
 	Circuit struct {
 		HalfOpenSuccesses int
@@ -91,6 +93,7 @@ func init() {
 	config.Server.ResultMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_MAX_WAIT", defaultServerResultMaxWait)
 	config.Server.ResultStreamMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_STREAM_MAX_WAIT", defaultServerResultStreamMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)
+	config.Server.CascadeLabels = getEnvOrDefault[string]("SERVER_CASCADE_LABELS", defaultServerCascadeLabels)
 
 	config.Circuit.HalfOpenSuccesses = getEnvOrDefault[int]("CIRCUIT_HALF_OPEN_SUCCESSES", defaultCircuitHalfOpenSuccesses)
 	config.Circuit.OpenTimeout = getEnvOrDefault[time.Duration]("CIRCUIT_OPEN_TIMEOUT", defaultCircuitOpenTimeout)
@@ -124,6 +127,11 @@ func getEnvOrDefault[T any](key string, def T) T {
 			return def
 		}
 		return any(pv).(T)
+	case string:
+		if v == "" {
+			return def
+		}
+		return any(v).(T)
 	default:
 		log.Warnf("Unknown type for %s=%s environment variable. Falling back on default %v", key, v, def)
 		return def
