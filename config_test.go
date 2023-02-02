@@ -16,4 +16,5 @@ func Test_DefaultConfig(t *testing.T) {
 	require.Equal(t, defaultServerMaxIdleConnsPerHost, config.Server.MaxIdleConnsPerHost)
 	require.Equal(t, defaultServerHttpClientTimeout, config.Server.HttpClientTimeout)
 	require.Equal(t, defaultServerMaxRequestBodySize, config.Server.MaxRequestBodySize)
+	require.Equal(t, defaultServerCascadeLabels, config.Server.CascadeLabels)
 }

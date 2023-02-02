@@ -25,6 +25,9 @@ const (
 
 func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodOptions:
+		discardBody(r)
+		handleIPNIOptions(w, false)
 	case http.MethodGet:
 		s.find(w, r)
 	default:
@@ -35,6 +38,9 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) findMultihash(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodOptions:
+		discardBody(r)
+		handleIPNIOptions(w, true)
 	case http.MethodPost:
 		s.find(w, r)
 	default:
@@ -45,6 +51,9 @@ func (s *server) findMultihash(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodOptions:
+		discardBody(r)
+		handleIPNIOptions(w, false)
 	case http.MethodGet:
 		s.find(w, r)
 	default:
@@ -306,6 +315,25 @@ outer:
 		return http.StatusInternalServerError, nil
 	}
 	return http.StatusOK, outData
+}
+
+func handleIPNIOptions(w http.ResponseWriter, post bool) {
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	var methods string
+	if post {
+		methods = "GET, POST, OPTIONS"
+	} else {
+		methods = "GET, OPTIONS"
+	}
+	w.Header().Add("Access-Control-Allow-Methods", methods)
+	w.Header().Add("Access-Control-Allow-Headers", "Content-Type, Accept")
+	if config.Server.CascadeLabels != "" {
+		// TODO Eventually we might want to propagate OPTIONS queries to backends,
+		//      and dynamically populate cascade labels with some caching config.
+		//      For now this is good enough.
+		w.Header().Add("X-IPNI-Allow-Cascade", config.Server.CascadeLabels)
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func discardBody(r *http.Request) {
