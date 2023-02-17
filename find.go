@@ -86,7 +86,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		endpoint := *req
 		endpoint.Host = b.Host
 		endpoint.Scheme = b.Scheme
-		log := log.With("backend", endpoint)
+		log := log.With("backend", endpoint.Host)
 
 		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
 		if err != nil {
@@ -94,6 +94,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set("Accept", mediaTypeJson)
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend for metadata", "err", err)
