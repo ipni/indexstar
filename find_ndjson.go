@@ -69,7 +69,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 		endpoint := *req
 		endpoint.Host = b.Host
 		endpoint.Scheme = b.Scheme
-		log := log.With("backend", endpoint)
+		log := log.With("backend", endpoint.Host)
 
 		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
 		if err != nil {

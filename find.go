@@ -220,7 +220,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		endpoint := *req
 		endpoint.Host = b.Host
 		endpoint.Scheme = b.Scheme
-		log := log.With("backend", endpoint)
+		log := log.With("backend", endpoint.Host)
 
 		bodyReader := bytes.NewReader(body)
 
@@ -230,6 +230,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			return nil, err
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set("Accept", mediaTypeJson)
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend", "err", err)
