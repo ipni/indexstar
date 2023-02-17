@@ -109,12 +109,14 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 				atomic.AddInt32(&count, 1)
 				return nil, nil
 			default:
+				body := string(line)
+				log := log.With("status", resp.StatusCode, "body", body)
 				if resp.StatusCode < http.StatusInternalServerError {
-					log.Warnw("Streaming request processing was not successful", "status", resp.StatusCode, "body", line)
+					log.Warn("Streaming request processing was not successful")
 					return nil, nil
 				}
-				log.Errorw("Streaming request processing failed due to server error", "status", resp.StatusCode, "body", line)
-				return nil, fmt.Errorf("status %d response from backend %s: %s", resp.StatusCode, b.String(), line)
+				log.Error("Streaming request processing failed due to server error")
+				return nil, fmt.Errorf("status %d response from backend %s: %s", resp.StatusCode, b.Host, body)
 			}
 		}
 		if err := scanner.Err(); err != nil {
