@@ -40,7 +40,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 			endpoint := *r.URL
 			endpoint.Host = server.Host
 			endpoint.Scheme = server.Scheme
-			log := log.With("backend", endpoint)
+			log := log.With("backend", endpoint.Host)
 
 			// If body in original request existed, make a reader for it.
 			req, err := http.NewRequest(r.Method, endpoint.String(), nil)
@@ -49,23 +49,28 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			req.Header.Set("X-Forwarded-Host", r.Host)
+			req.Header.Set("Accept", mediaTypeJson)
 			resp, err := s.Client.Do(req)
 			if err != nil {
 				log.Warnw("failed query", "err", err)
 				return
 			}
+
 			defer resp.Body.Close()
-			dec := json.NewDecoder(resp.Body)
-			var providers []model.ProviderInfo
-			err = dec.Decode(&providers)
-			if err != nil {
-				log.Warnw("failed backend read", "err", err)
-				return
-			}
-			if resp.StatusCode == http.StatusOK {
+			log = log.With("status", resp.StatusCode)
+			switch resp.StatusCode {
+			case http.StatusOK:
+				dec := json.NewDecoder(resp.Body)
+				var providers []model.ProviderInfo
+				if err := dec.Decode(&providers); err != nil {
+					log.Warnw("failed backend read", "err", err)
+					return
+				}
 				combined <- providers
-			} else {
-				log.Warnw("failed backend unmarshal", "err", err)
+			case http.StatusNotFound, http.StatusNotImplemented:
+				log.Debug("no providers")
+			default:
+				log.Warn("unexpected response while getting providers")
 			}
 		}(server)
 	}
@@ -127,7 +132,7 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 			endpoint := *r.URL
 			endpoint.Host = server.Host
 			endpoint.Scheme = server.Scheme
-			log := log.With("backend", endpoint)
+			log := log.With("backend", endpoint.Host)
 
 			req, err := http.NewRequest(r.Method, endpoint.String(), nil)
 			if err != nil {
@@ -135,23 +140,27 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			req.Header.Set("X-Forwarded-Host", r.Host)
+			req.Header.Set("Accept", mediaTypeJson)
 			resp, err := s.Client.Do(req)
 			if err != nil {
 				log.Warnw("failed query", "err", err)
 				return
 			}
 			defer resp.Body.Close()
-			dec := json.NewDecoder(resp.Body)
-			var provider model.ProviderInfo
-			err = dec.Decode(&provider)
-			if err != nil {
-				log.Warnw("failed backend read", "err", err)
-				return
-			}
-			if resp.StatusCode == http.StatusOK {
+			log = log.With("status", resp.StatusCode)
+			switch resp.StatusCode {
+			case http.StatusOK:
+				dec := json.NewDecoder(resp.Body)
+				var provider model.ProviderInfo
+				if err = dec.Decode(&provider); err != nil {
+					log.Warnw("failed backend read", "err", err)
+					return
+				}
 				combined <- provider
-			} else {
-				log.Warnw("failed backend unmarshal", "err", err)
+			case http.StatusNotFound, http.StatusNotImplemented:
+				log.Debug("no provider")
+			default:
+				log.Warn("unexpected response while getting provider")
 			}
 		}(server)
 	}
