@@ -254,12 +254,14 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			atomic.AddInt32(&count, 1)
 			return nil, nil
 		default:
+			body := string(data)
+			log := log.With("status", resp.StatusCode, "body", body)
 			if resp.StatusCode < http.StatusInternalServerError {
-				log.Warnw("Request processing was not successful", "status", resp.StatusCode, "body", data)
+				log.Warn("Request processing was not successful")
 				return nil, nil
 			}
-			log.Errorw("Request processing failed due to server error", "status", resp.StatusCode, "body", data)
-			return nil, fmt.Errorf("status %d response from backend %s: %s", resp.StatusCode, b.String(), data)
+			log.Error("Request processing failed due to server error")
+			return nil, fmt.Errorf("status %d response from backend %s: %s", resp.StatusCode, b.Host, body)
 		}
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
