@@ -200,10 +200,12 @@ LOOP:
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
-	if err := encoder.Encode(model.FindResponse{
-		MultihashResults: []model.MultihashResult{*mhr},
-	}); err != nil {
-		log.Errorw("Failed to encode translated non streaming response", "err", err)
+	if translateNonStreaming {
+		if err := encoder.Encode(model.FindResponse{
+			MultihashResults: []model.MultihashResult{*mhr},
+		}); err != nil {
+			log.Errorw("Failed to encode translated non streaming response", "err", err)
+		}
 	}
 	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
 }
