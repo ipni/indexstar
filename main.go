@@ -44,6 +44,10 @@ func main() {
 				Name:  "translateReframe",
 				Usage: "translate reframe requests into find requests to backends",
 			},
+			&cli.BoolFlag{
+				Name:  "translateNonStreaming",
+				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			exit := make(chan os.Signal, 1)

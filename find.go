@@ -7,12 +7,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/ipfs/go-cid"
 	"github.com/ipni/indexstar/httpserver"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/ipni/storetheindex/api/v0/finder/model"
+	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -29,7 +33,13 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
 		discardBody(r)
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
-		s.find(w, r)
+		sc := strings.TrimPrefix(path.Base(r.URL.Path), "cid/")
+		c, err := cid.Decode(sc)
+		if err != nil {
+			discardBody(r)
+			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
+		}
+		s.find(w, r, c.Hash())
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
@@ -42,7 +52,7 @@ func (s *server) findMultihash(w http.ResponseWriter, r *http.Request) {
 		discardBody(r)
 		handleIPNIOptions(w, true)
 	case http.MethodPost:
-		s.find(w, r)
+		s.find(w, r, nil)
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
@@ -55,7 +65,15 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
 		discardBody(r)
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
-		s.find(w, r)
+
+		smh := strings.TrimPrefix(path.Base(r.URL.Path), "multihash/")
+		mh, err := multihash.FromB58String(smh)
+		if err != nil {
+			discardBody(r)
+			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
+		}
+
+		s.find(w, r, mh)
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
@@ -142,7 +160,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJsonResponse(w, http.StatusOK, res)
 }
 
-func (s *server) find(w http.ResponseWriter, r *http.Request) {
+func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash) {
 	acc, err := getAccepts(r)
 	if err != nil {
 		discardBody(r)
@@ -175,12 +193,24 @@ func (s *server) find(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
+	if mh == nil {
+		// mh should only be nil for batch find POST request.
+		// Sanity check it and return 500 if it is.
+		log.Error("multihash must not be nil for single find requests; mh should only be nil for batch find POST request.")
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
 	// Use NDJSON response only when the request explicitly accepts it. Otherwise, fallback on
 	// JSON unless only unsupported media types are specified.
 	switch {
 	case acc.ndjson:
-		s.doFindNDJson(ctx, w, r.Method, findMethodOrig, r.URL)
+		s.doFindNDJson(ctx, w, findMethodOrig, r.URL, false, mh)
 	case acc.json || acc.any || !acc.acceptHeaderFound:
+		if s.translateNonStreaming {
+			s.doFindNDJson(ctx, w, findMethodOrig, r.URL, true, mh)
+			return
+		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
 		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb)

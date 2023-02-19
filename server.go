@@ -22,12 +22,13 @@ type server struct {
 	context.Context
 	http.Client
 	net.Listener
-	metricsListener  net.Listener
-	cfgBase          string
-	servers          []*url.URL
-	serverCallers    []*circuitbreaker.CircuitBreaker
-	base             http.Handler
-	translateReframe bool
+	metricsListener       net.Listener
+	cfgBase               string
+	servers               []*url.URL
+	serverCallers         []*circuitbreaker.CircuitBreaker
+	base                  http.Handler
+	translateReframe      bool
+	translateNonStreaming bool
 }
 
 func NewServer(c *cli.Context) (*server, error) {
@@ -90,13 +91,14 @@ func NewServer(c *cli.Context) (*server, error) {
 			Timeout:   config.Server.HttpClientTimeout,
 			Transport: t,
 		},
-		cfgBase:          c.String("config"),
-		Listener:         bound,
-		metricsListener:  mb,
-		servers:          surls,
-		serverCallers:    scallers,
-		base:             httputil.NewSingleHostReverseProxy(surls[0]),
-		translateReframe: c.Bool("translateReframe"),
+		cfgBase:               c.String("config"),
+		Listener:              bound,
+		metricsListener:       mb,
+		servers:               surls,
+		serverCallers:         scallers,
+		base:                  httputil.NewSingleHostReverseProxy(surls[0]),
+		translateReframe:      c.Bool("translateReframe"),
+		translateNonStreaming: c.Bool("translateNonStreaming"),
 	}, nil
 }
 
