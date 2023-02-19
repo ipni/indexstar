@@ -13,6 +13,7 @@ import (
 
 	"github.com/ipni/indexstar/metrics"
 	"github.com/ipni/storetheindex/api/v0/finder/model"
+	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -42,9 +43,9 @@ func newResultSet() resultSet {
 	return make(map[uint32]struct{})
 }
 
-func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method, source string, req *url.URL) {
+func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash) {
 	start := time.Now()
-	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
+	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
 	defer func() {
 		_ = stats.RecordWithOptions(context.Background(),
@@ -54,11 +55,17 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 			stats.WithTags(loadTags...),
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
+	var maxWait time.Duration
+	if translateNonStreaming {
+		maxWait = config.Server.ResultMaxWait
+	} else {
+		maxWait = config.Server.ResultStreamMaxWait
+	}
 
 	sg := &scatterGather[*url.URL, any]{
 		targets: s.servers,
 		tcb:     s.serverCallers,
-		maxWait: config.Server.ResultStreamMaxWait,
+		maxWait: maxWait,
 	}
 
 	resultsChan := make(chan *model.ProviderResult, 1)
@@ -71,7 +78,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 		endpoint.Scheme = b.Scheme
 		log := log.With("backend", endpoint.Host)
 
-		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
+		req, err := http.NewRequestWithContext(cctx, http.MethodGet, endpoint.String(), nil)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
 			return nil, err
@@ -130,9 +137,18 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method
 		return
 	}
 
-	w.Header().Set("Content-Type", mediaTypeNDJson)
-	w.Header().Set("Connection", "Keep-Alive")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	var mhr *model.MultihashResult
+	if translateNonStreaming {
+		w.Header().Set("Content-Type", mediaTypeJson)
+		mhr = &model.MultihashResult{
+			Multihash:       mh,
+			ProviderResults: nil,
+		}
+	} else {
+		w.Header().Set("Content-Type", mediaTypeNDJson)
+		w.Header().Set("Connection", "Keep-Alive")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 
 	flusher, flushable := w.(http.Flusher)
 	encoder := json.NewEncoder(w)
@@ -146,6 +162,7 @@ LOOP:
 		case _, ok := <-sg.gather(ctx):
 			if !ok {
 				close(resultsChan)
+				break LOOP
 			}
 		case result, ok := <-resultsChan:
 			if !ok {
@@ -155,18 +172,23 @@ LOOP:
 			if !absent {
 				continue
 			}
-			if err := encoder.Encode(result); err != nil {
-				log.Errorw("failed to encode streaming result", "result", result, "err", err)
-				continue
-			}
-			if _, err := w.Write(newline); err != nil {
-				log.Errorw("failed to write newline while streaming results", "result", result, "err", err)
-				continue
-			}
-			// TODO: optimise the number of time we call flush based on some time-based or result
-			//       count heuristic.
-			if flushable {
-				flusher.Flush()
+
+			if translateNonStreaming {
+				mhr.ProviderResults = append(mhr.ProviderResults, *result)
+			} else {
+				if err := encoder.Encode(result); err != nil {
+					log.Errorw("failed to encode streaming result", "result", result, "err", err)
+					continue
+				}
+				if _, err := w.Write(newline); err != nil {
+					log.Errorw("failed to write newline while streaming results", "result", result, "err", err)
+					continue
+				}
+				// TODO: optimise the number of time we call flush based on some time-based or result
+				//       count heuristic.
+				if flushable {
+					flusher.Flush()
+				}
 			}
 		}
 	}
@@ -177,6 +199,11 @@ LOOP:
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		http.Error(w, "", http.StatusNotFound)
 		return
+	}
+	if err := encoder.Encode(model.FindResponse{
+		MultihashResults: []model.MultihashResult{*mhr},
+	}); err != nil {
+		log.Errorw("Failed to encode translated non streaming response", "err", err)
 	}
 	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
 }
