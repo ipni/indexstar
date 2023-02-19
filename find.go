@@ -193,14 +193,6 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 	ctx := r.Context()
 
-	if mh == nil {
-		// mh should only be nil for batch find POST request.
-		// Sanity check it and return 500 if it is.
-		log.Error("multihash must not be nil for single find requests; mh should only be nil for batch find POST request.")
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
 	// Use NDJSON response only when the request explicitly accepts it. Otherwise, fallback on
 	// JSON unless only unsupported media types are specified.
 	switch {
