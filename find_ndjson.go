@@ -20,17 +20,29 @@ import (
 
 var newline = []byte("\n")
 
-type resultSet map[uint32]struct{}
+type (
+	resultSet map[uint32]struct{}
 
-func (r resultSet) putIfAbsent(p *model.ProviderResult) bool {
+	encryptedOrPlainResult struct {
+		model.ProviderResult
+		EncryptedValueKey []byte `json:"EncryptedValueKey"`
+	}
+)
+
+func (r resultSet) putIfAbsent(p *encryptedOrPlainResult) bool {
 	// Calculate crc32 hash from provider ID + context ID to check for uniqueness of returned
 	// results. The rationale for using crc32 hashing is that it is fast and good enough
 	// for uniqueness check within a lookup request, while offering a small memory footprint
 	// compared to storing the complete key, i.e. provider ID + context ID.
-	pidb := []byte(p.Provider.ID)
-	v := make([]byte, 0, len(pidb)+len(p.ContextID))
-	v = append(v, pidb...)
-	v = append(v, p.ContextID...)
+	var v []byte
+	if len(p.EncryptedValueKey) > 0 {
+		v = p.EncryptedValueKey
+	} else {
+		pidb := []byte(p.Provider.ID)
+		v = make([]byte, 0, len(pidb)+len(p.ContextID))
+		v = append(v, pidb...)
+		v = append(v, p.ContextID...)
+	}
 	key := crc32.ChecksumIEEE(v)
 	if _, seen := r[key]; seen {
 		return false
@@ -68,7 +80,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		maxWait: maxWait,
 	}
 
-	resultsChan := make(chan *model.ProviderResult, 1)
+	resultsChan := make(chan *encryptedOrPlainResult, 1)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*any, error) {
 		// Copy the URL from original request and override host/schema to point
@@ -94,7 +106,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
-			var result model.ProviderResult
+			var result encryptedOrPlainResult
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
@@ -107,7 +119,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 				}
 				// Sanity check the results in case backends don't respect accept media types;
 				// see: https://github.com/ipni/storetheindex/issues/1209
-				if result.Provider.ID == "" || len(result.Provider.Addrs) == 0 {
+				if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
 					return nil, nil
 				}
 				resultsChan <- &result
@@ -137,13 +149,10 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		return
 	}
 
-	var mhr *model.MultihashResult
+	var provResults []model.ProviderResult
+	var encValKeys [][]byte
 	if translateNonStreaming {
 		w.Header().Set("Content-Type", mediaTypeJson)
-		mhr = &model.MultihashResult{
-			Multihash:       mh,
-			ProviderResults: nil,
-		}
 	} else {
 		w.Header().Set("Content-Type", mediaTypeNDJson)
 		w.Header().Set("Connection", "Keep-Alive")
@@ -174,7 +183,12 @@ LOOP:
 			}
 
 			if translateNonStreaming {
-				mhr.ProviderResults = append(mhr.ProviderResults, *result)
+
+				if len(result.EncryptedValueKey) > 0 {
+					encValKeys = append(encValKeys, result.EncryptedValueKey)
+				} else {
+					provResults = append(provResults, result.ProviderResult)
+				}
 			} else {
 				if err := encoder.Encode(result); err != nil {
 					log.Errorw("failed to encode streaming result", "result", result, "err", err)
@@ -201,9 +215,24 @@ LOOP:
 		return
 	}
 	if translateNonStreaming {
-		if err := encoder.Encode(model.FindResponse{
-			MultihashResults: []model.MultihashResult{*mhr},
-		}); err != nil {
+		var resp model.FindResponse
+		if len(provResults) > 0 {
+			resp.MultihashResults = []model.MultihashResult{
+				{
+					Multihash:       mh,
+					ProviderResults: provResults,
+				},
+			}
+		}
+		if len(encValKeys) > 0 {
+			resp.EncryptedMultihashResults = []model.EncryptedMultihashResult{
+				{
+					Multihash:          mh,
+					EncryptedValueKeys: encValKeys,
+				},
+			}
+		}
+		if err := encoder.Encode(resp); err != nil {
 			log.Errorw("Failed to encode translated non streaming response", "err", err)
 		}
 	}
