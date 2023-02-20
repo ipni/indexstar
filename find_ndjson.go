@@ -25,7 +25,7 @@ type (
 
 	encryptedOrPlainResult struct {
 		model.ProviderResult
-		EncryptedValueKey []byte `json:"EncryptedValueKey"`
+		EncryptedValueKey []byte `json:"EncryptedValueKey,omitempty"`
 	}
 )
 
