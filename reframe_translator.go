@@ -75,7 +75,7 @@ func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Ci
 			seen := make(map[peer.ID]struct{})
 			for _, prov := range parsed.MultihashResults[0].ProviderResults {
 				if _, ok := seen[prov.Provider.ID]; !ok && isBitswapMetadata(prov.Metadata) {
-					outMsg.AddrInfo = append(outMsg.AddrInfo, prov.Provider)
+					outMsg.AddrInfo = append(outMsg.AddrInfo, *prov.Provider)
 					seen[prov.Provider.ID] = struct{}{}
 				}
 			}
