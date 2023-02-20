@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -70,19 +71,23 @@ func main() {
 				timeChan <-chan time.Time
 			)
 			if configCheckInterval != 0 {
-				modTime, _, err = fileChanged(cfgPath, modTime)
-				if err != nil {
-					log.Error(err)
-				}
-				ticker = time.NewTicker(configCheckInterval)
-				timeChan = ticker.C
-
 				cfgPath = s.cfgBase
 				if cfgPath == "" {
 					cfgPath, err = Filename("")
 					if err != nil {
 						return err
 					}
+				}
+
+				modTime, _, err = fileChanged(cfgPath, modTime)
+				if err != nil {
+					// No config file is not an error.
+					if !errors.Is(err, os.ErrNotExist) {
+						log.Error(err)
+					}
+				} else {
+					ticker = time.NewTicker(configCheckInterval)
+					timeChan = ticker.C
 				}
 			}
 
