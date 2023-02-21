@@ -13,6 +13,7 @@ import (
 
 	"github.com/ipni/indexstar/metrics"
 	"github.com/ipni/storetheindex/api/v0/finder/model"
+	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
@@ -130,12 +131,12 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 			default:
 				body := string(line)
 				log := log.With("status", resp.StatusCode, "body", body)
+				log.Warn("Request processing was not successful")
+				err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
 				if resp.StatusCode < http.StatusInternalServerError {
-					log.Warn("Streaming request processing was not successful")
-					return nil, nil
+					err = circuitbreaker.MarkAsSuccess(err)
 				}
-				log.Error("Streaming request processing failed due to server error")
-				return nil, fmt.Errorf("status %d response from backend %s: %s", resp.StatusCode, b.Host, body)
+				return nil, err
 			}
 		}
 		if err := scanner.Err(); err != nil {
