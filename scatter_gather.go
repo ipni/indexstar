@@ -21,12 +21,17 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 	sg.start = time.Now()
 	sg.out = make(chan R, 1)
 	for i, t := range sg.targets {
-		if (len(sg.tcb) > 0) && !sg.tcb[i].Ready() {
+
+		var cb *circuitbreaker.CircuitBreaker
+		if len(sg.tcb) > i {
+			cb = sg.tcb[i]
+		}
+		if cb != nil && !cb.Ready() {
 			continue
 		}
 
 		sg.wg.Add(1)
-		go func(target T, i int) {
+		go func(target T, tcb *circuitbreaker.CircuitBreaker) {
 			defer sg.wg.Done()
 
 			select {
@@ -36,28 +41,23 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 			default:
 			}
 
-			cctx, cncl := context.WithTimeout(ctx, sg.maxWait)
+			cctx, cancel := context.WithTimeout(ctx, sg.maxWait)
 			sout, err := forEach(cctx, target)
-			cncl()
-			if len(sg.tcb) > 0 {
-				err = sg.tcb[i].Done(ctx, err)
+			cancel()
+			if tcb != nil {
+				err = tcb.Done(cctx, err)
 			}
 			if err != nil {
-				log.Errorw("failed to scatter on target", "target", target, "err", err)
+				log.Errorw("failed to scatter on target", "target", target, "err", err, "maxWait", sg.maxWait)
 				return
 			}
-
 			if sout != nil {
-				if ctx.Err() == nil {
-					select {
-					case <-ctx.Done():
-						return
-					case sg.out <- *sout:
-						return
-					}
+				select {
+				case <-ctx.Done():
+				case sg.out <- *sout:
 				}
 			}
-		}(t, i)
+		}(t, cb)
 	}
 	go func() {
 		defer close(sg.out)
@@ -71,16 +71,23 @@ func (sg *scatterGather[_, R]) gather(ctx context.Context) <-chan R {
 	go func() {
 		defer func() {
 			close(gout)
-			elapsed := time.Since(sg.start)
-			log.Debugw("Completed scatter gather", "elapsed", elapsed.String())
+			log.Debugw("Completed scatter gather", "elapsed", time.Since(sg.start))
 		}()
 
-		for r := range sg.out {
+		for {
 			select {
 			case <-ctx.Done():
-				continue
-			case gout <- r:
-				continue
+				return
+			case r, ok := <-sg.out:
+				if !ok {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case gout <- r:
+					continue
+				}
 			}
 		}
 	}()

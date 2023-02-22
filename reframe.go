@@ -79,6 +79,9 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 		maxWait: config.Reframe.ResultMaxWait,
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if err := sg.scatter(ctx, func(cctx context.Context, b *backendDelegatedRoutingClient) (*drclient.FindProvidersAsyncResult, error) {
 		ch, err := b.FindProvidersAsync(cctx, key)
 		if err != nil {
@@ -133,14 +136,20 @@ func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan
 				result.AddrInfo = append(result.AddrInfo, ai)
 			}
 			if len(result.AddrInfo) > 0 {
-				out <- result
+				select {
+				case <-ctx.Done():
+					return
+				case out <- result:
+				}
 			}
 		}
 
 		// If nothing is found then return the last returned error, if any.
-		if len(pids) == 0 {
-			out <- drclient.FindProvidersAsyncResult{
-				Err: lastErr,
+		if len(pids) == 0 && lastErr != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case out <- drclient.FindProvidersAsyncResult{Err: lastErr}:
 			}
 		}
 	}()

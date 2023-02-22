@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"net/http"
 	"net/url"
 	"sync/atomic"
@@ -81,6 +82,9 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		maxWait: maxWait,
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	resultsChan := make(chan *encryptedOrPlainResult, 1)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*any, error) {
@@ -105,45 +109,59 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		}
 		defer resp.Body.Close()
 
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			var result encryptedOrPlainResult
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
+		switch resp.StatusCode {
+		case http.StatusOK:
+		case http.StatusNotFound:
+			atomic.AddInt32(&count, 1)
+			return nil, nil
+		default:
+			bb, _ := io.ReadAll(resp.Body)
+			body := string(bb)
+			log := log.With("status", resp.StatusCode, "body", body)
+			log.Warn("Request processing was not successful")
+			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
+			if resp.StatusCode < http.StatusInternalServerError {
+				err = circuitbreaker.MarkAsSuccess(err)
 			}
-			switch resp.StatusCode {
-			case http.StatusOK:
-				atomic.AddInt32(&count, 1)
-				if err := json.Unmarshal(line, &result); err != nil {
-					return nil, err
-				}
-				// Sanity check the results in case backends don't respect accept media types;
-				// see: https://github.com/ipni/storetheindex/issues/1209
-				if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
-					return nil, nil
-				}
-				resultsChan <- &result
-				continue
-			case http.StatusNotFound:
-				atomic.AddInt32(&count, 1)
-				return nil, nil
-			default:
-				body := string(line)
-				log := log.With("status", resp.StatusCode, "body", body)
-				log.Warn("Request processing was not successful")
-				err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
-				if resp.StatusCode < http.StatusInternalServerError {
-					err = circuitbreaker.MarkAsSuccess(err)
-				}
-				return nil, err
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			log.Warnw("Failed to read backend response", "err", err)
 			return nil, err
 		}
-		return nil, nil
+
+		scanner := bufio.NewScanner(resp.Body)
+		for {
+			select {
+			case <-cctx.Done():
+				return nil, nil
+			default:
+				if scanner.Scan() {
+					var result encryptedOrPlainResult
+					line := scanner.Bytes()
+					if len(line) == 0 {
+						continue
+					}
+					atomic.AddInt32(&count, 1)
+					if err := json.Unmarshal(line, &result); err != nil {
+						return nil, circuitbreaker.MarkAsSuccess(err)
+					}
+					// Sanity check the results in case backends don't respect accept media types;
+					// see: https://github.com/ipni/storetheindex/issues/1209
+					if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						continue
+					}
+
+					select {
+					case <-cctx.Done():
+						return nil, nil
+					case resultsChan <- &result:
+					}
+					continue
+				}
+				if err := scanner.Err(); err != nil {
+					log.Warnw("Failed to read backend response", "err", err)
+					return nil, circuitbreaker.MarkAsSuccess(err)
+				}
+				return nil, nil
+			}
+		}
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
@@ -172,7 +190,6 @@ LOOP:
 		case _, ok := <-sg.gather(ctx):
 			if !ok {
 				close(resultsChan)
-				break LOOP
 			}
 		case result, ok := <-resultsChan:
 			if !ok {

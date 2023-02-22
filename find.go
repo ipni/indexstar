@@ -88,7 +88,8 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 	method := r.Method
 	req := r.URL
 
@@ -147,25 +148,17 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var res []byte
 	for md := range sg.gather(ctx) {
-		if len(md) == 0 {
-			continue
-		}
 		// It's ok to return the first encountered metadata. This is because metadata is uniquely identified
 		// by ValueKey (peerID + contextID). I.e. it's not possible to have different metadata records for the same ValueKey.
 		// In comparison to regular find requests where it's perfectly normal to have different results returned by different IPNI
 		// instances and hence they need to be aggregated.
-		res = md
-		// Continue to iterate to drain channels and avoid memory leak.
+		if len(md) > 0 {
+			httpserver.WriteJsonResponse(w, http.StatusOK, md)
+			return
+		}
 	}
-
-	if len(res) == 0 {
-		http.Error(w, "", http.StatusNotFound)
-		return
-	}
-
-	httpserver.WriteJsonResponse(w, http.StatusOK, res)
+	http.Error(w, "", http.StatusNotFound)
 }
 
 func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash) {
@@ -244,6 +237,9 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		maxWait: config.Server.ResultMaxWait,
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (**model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
@@ -279,7 +275,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			atomic.AddInt32(&count, 1)
 			providers, err := model.UnmarshalFindResponse(data)
 			if err != nil {
-				return nil, err
+				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
 			return &providers, nil
 		case http.StatusNotFound:
