@@ -6,12 +6,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipni/indexstar/httpserver"
 	"github.com/ipni/indexstar/metrics"
-
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
 )
@@ -24,8 +23,7 @@ type server struct {
 	net.Listener
 	metricsListener       net.Listener
 	cfgBase               string
-	servers               []*url.URL
-	serverCallers         []*circuitbreaker.CircuitBreaker
+	backends              []Backend
 	base                  http.Handler
 	translateReframe      bool
 	translateNonStreaming bool
@@ -41,36 +39,21 @@ func NewServer(c *cli.Context) (*server, error) {
 		return nil, err
 	}
 	servers := c.StringSlice("backends")
+	cascadeServers := c.StringSlice("cascadeBackends")
 
-	var surls []*url.URL
 	if len(servers) == 0 {
 		if !c.IsSet("config") {
 			return nil, fmt.Errorf("no backends specified")
 		}
-		surls, err = Load(c.String("config"))
+		servers, err = Load(c.String("config"))
 		if err != nil {
 			return nil, fmt.Errorf("could not load backends from config: %w", err)
 		}
-	} else {
-		surls = make([]*url.URL, len(servers))
-		for i, s := range servers {
-			surls[i], err = url.Parse(s)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
-	scallers := make([]*circuitbreaker.CircuitBreaker, len(surls))
-	for i, surl := range surls {
-		scallers[i] = circuitbreaker.New(
-			circuitbreaker.WithFailOnContextCancel(false),
-			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
-			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
-			circuitbreaker.WithCounterResetInterval(config.Circuit.CounterReset),
-			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
-				log.Infof("circuit state for %s changed from %s to %s", surl.String(), from, to)
-			}))
+	backends, err := loadBackends(servers, cascadeServers)
+	if err != nil {
+		return nil, err
 	}
 
 	t := http.DefaultTransport.(*http.Transport).Clone()
@@ -94,21 +77,73 @@ func NewServer(c *cli.Context) (*server, error) {
 		cfgBase:               c.String("config"),
 		Listener:              bound,
 		metricsListener:       mb,
-		servers:               surls,
-		serverCallers:         scallers,
-		base:                  httputil.NewSingleHostReverseProxy(surls[0]),
+		backends:              backends,
+		base:                  httputil.NewSingleHostReverseProxy(backends[0].URL()),
 		translateReframe:      c.Bool("translateReframe"),
 		translateNonStreaming: c.Bool("translateNonStreaming"),
 	}, nil
 }
 
-func (s *server) Reload() error {
+func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
+	var backends []Backend
+	for _, s := range servers {
+		b, err := NewBackend(s, circuitbreaker.New(
+			circuitbreaker.WithFailOnContextCancel(false),
+			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
+			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
+			circuitbreaker.WithCounterResetInterval(config.Circuit.CounterReset),
+			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
+				log.Infof("circuit state for %s changed from %s to %s", s, from, to)
+			})), Matchers.Any)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate backend: %w", err)
+		}
+		backends = append(backends, b)
+	}
+
+	for _, cs := range cascadeServers {
+		matcher := Matchers.Any
+		if config.Server.CascadeLabels != "" {
+			labels := strings.Split(config.Server.CascadeLabels, ",")
+			if len(labels) > 0 {
+				labelMatchers := make([]HttpRequestMatcher, 0, len(labels))
+				for _, label := range labels {
+					labelMatchers = append(labelMatchers, Matchers.QueryParam("cascade", label))
+				}
+				matcher = Matchers.AnyOf(labelMatchers...)
+			}
+		}
+		b, err := NewBackend(cs, circuitbreaker.New(
+			circuitbreaker.WithFailOnContextCancel(false),
+			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.CascadeCircuit.HalfOpenSuccesses)),
+			circuitbreaker.WithOpenTimeout(config.CascadeCircuit.OpenTimeout),
+			circuitbreaker.WithCounterResetInterval(config.CascadeCircuit.CounterReset),
+			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
+				log.Infof("cascade circuit state for %s changed from %s to %s", cs, from, to)
+			})), matcher)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate cascade backend: %w", err)
+		}
+		backends = append(backends, b)
+	}
+
+	if len(backends) == 0 {
+		return nil, fmt.Errorf("no backends specified")
+	}
+	return backends, nil
+}
+
+func (s *server) Reload(cctx *cli.Context) error {
 	surls, err := Load(s.cfgBase)
 	if err != nil {
 		return err
 	}
-	s.servers = surls
-	s.base = httputil.NewSingleHostReverseProxy(surls[0])
+	b, err := loadBackends(surls, cctx.StringSlice("cascadeBackends"))
+	if err != nil {
+		return err
+	}
+	s.backends = b
+	s.base = httputil.NewSingleHostReverseProxy(b[0].URL())
 	return nil
 }
 
@@ -133,7 +168,7 @@ func (s *server) Serve() chan error {
 		}
 		mux.HandleFunc("/reframe", reframe)
 	} else {
-		reframe, err := NewReframeHTTPHandler(s.servers)
+		reframe, err := NewReframeHTTPHandler(s.backends)
 		if err != nil {
 			ec <- err
 			close(ec)
@@ -202,9 +237,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// default behavior.
-	r.URL.Host = s.servers[0].Host
-	r.URL.Scheme = s.servers[0].Scheme
+	firstBackend := s.backends[0].URL()
+	r.URL.Host = firstBackend.Host
+	r.URL.Scheme = firstBackend.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-	r.Header.Set("Host", s.servers[0].Host)
+	r.Header.Set("Host", firstBackend.Host)
 	s.base.ServeHTTP(w, r)
 }

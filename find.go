@@ -93,19 +93,18 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
 	req := r.URL
 
-	sg := &scatterGather[*url.URL, []byte]{
-		targets: s.servers,
-		tcb:     s.serverCallers,
-		maxWait: config.Server.ResultMaxWait,
+	sg := &scatterGather[Backend, []byte]{
+		backends: s.backends,
+		maxWait:  config.Server.ResultMaxWait,
 	}
 
 	// TODO: wait for the first successful response instead
-	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*[]byte, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
-		endpoint.Host = b.Host
-		endpoint.Scheme = b.Scheme
+		endpoint.Host = b.URL().Host
+		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
 
 		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
@@ -115,6 +114,9 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeJson)
+		if !b.Matches(req) {
+			return nil, nil
+		}
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend for metadata", "err", err)
@@ -136,7 +138,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 			body := string(data)
 			log := log.With("status", resp.StatusCode, "body", body)
 			log.Warn("Request processing was not successful")
-			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
+			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
 			if resp.StatusCode < http.StatusInternalServerError {
 				err = circuitbreaker.MarkAsSuccess(err)
 			}
@@ -231,26 +233,24 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
 
-	sg := &scatterGather[*url.URL, *model.FindResponse]{
-		targets: s.servers,
-		tcb:     s.serverCallers,
-		maxWait: config.Server.ResultMaxWait,
+	sg := &scatterGather[Backend, *model.FindResponse]{
+		backends: s.backends,
+		maxWait:  config.Server.ResultMaxWait,
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var count int32
-	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (**model.FindResponse, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (**model.FindResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
-		endpoint.Host = b.Host
-		endpoint.Scheme = b.Scheme
+		endpoint.Host = b.URL().Host
+		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
 
 		bodyReader := bytes.NewReader(body)
-
 		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), bodyReader)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
@@ -258,6 +258,11 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeJson)
+
+		if !b.Matches(req) {
+			return nil, nil
+		}
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend", "err", err)
@@ -285,7 +290,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			body := string(data)
 			log := log.With("status", resp.StatusCode, "body", body)
 			log.Warn("Request processing was not successful")
-			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
+			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
 			if resp.StatusCode < http.StatusInternalServerError {
 				err = circuitbreaker.MarkAsSuccess(err)
 			}

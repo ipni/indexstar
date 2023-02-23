@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,6 +34,10 @@ const (
 	defaultCircuitHalfOpenSuccesses = 10
 	defaultCircuitOpenTimeout       = 0
 	defaultCircuitCounterReset      = 1 * time.Second
+
+	defaultCascadeCircuitHalfOpenSuccesses = 10
+	defaultCascadeCircuitOpenTimeout       = 0
+	defaultCascadeCircuitCounterReset      = 1 * time.Second
 
 	// DefaultPathName is the default config dir name.
 	DefaultPathName = ".indexstar"
@@ -73,6 +76,11 @@ var config struct {
 		OpenTimeout       time.Duration
 		CounterReset      time.Duration
 	}
+	CascadeCircuit struct {
+		HalfOpenSuccesses int
+		OpenTimeout       time.Duration
+		CounterReset      time.Duration
+	}
 }
 
 func init() {
@@ -98,6 +106,10 @@ func init() {
 	config.Circuit.HalfOpenSuccesses = getEnvOrDefault[int]("CIRCUIT_HALF_OPEN_SUCCESSES", defaultCircuitHalfOpenSuccesses)
 	config.Circuit.OpenTimeout = getEnvOrDefault[time.Duration]("CIRCUIT_OPEN_TIMEOUT", defaultCircuitOpenTimeout)
 	config.Circuit.CounterReset = getEnvOrDefault[time.Duration]("CIRCUIT_COUNTER_RESET", defaultCircuitCounterReset)
+
+	config.CascadeCircuit.HalfOpenSuccesses = getEnvOrDefault[int]("CASCADE_CIRCUIT_HALF_OPEN_SUCCESSES", defaultCascadeCircuitHalfOpenSuccesses)
+	config.CascadeCircuit.OpenTimeout = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_OPEN_TIMEOUT", defaultCascadeCircuitOpenTimeout)
+	config.CascadeCircuit.CounterReset = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_COUNTER_RESET", defaultCascadeCircuitCounterReset)
 }
 
 func getEnvOrDefault[T any](key string, def T) T {
@@ -175,7 +187,7 @@ func PathRoot() (string, error) {
 	return homedir.Expand(DefaultPathRoot)
 }
 
-func Load(filePath string) ([]*url.URL, error) {
+func Load(filePath string) ([]string, error) {
 	var err error
 	if filePath == "" {
 		filePath, err = Filename("")
@@ -193,19 +205,9 @@ func Load(filePath string) ([]*url.URL, error) {
 	}
 	defer f.Close()
 
-	cfg := []string{}
-	if err = json.NewDecoder(f).Decode(&cfg); err != nil {
+	var urls []string
+	if err = json.NewDecoder(f).Decode(&urls); err != nil {
 		return nil, err
 	}
-
-	surls := make([]*url.URL, 0, len(cfg))
-	for _, s := range cfg {
-		surl, err := url.Parse(s)
-		if err != nil {
-			return nil, err
-		}
-		surls = append(surls, surl)
-	}
-
-	return surls, nil
+	return urls, nil
 }

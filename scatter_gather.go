@@ -4,34 +4,27 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/mercari/go-circuitbreaker"
 )
 
-type scatterGather[T, R any] struct {
-	targets []T
-	tcb     []*circuitbreaker.CircuitBreaker
-	start   time.Time
-	wg      sync.WaitGroup
-	out     chan R
-	maxWait time.Duration
+type scatterGather[B Backend, R any] struct {
+	backends []B
+	start    time.Time
+	wg       sync.WaitGroup
+	out      chan R
+	maxWait  time.Duration
 }
 
-func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context.Context, T) (*R, error)) error {
+func (sg *scatterGather[B, R]) scatter(ctx context.Context, forEach func(context.Context, B) (*R, error)) error {
 	sg.start = time.Now()
 	sg.out = make(chan R, 1)
-	for i, t := range sg.targets {
+	for _, backend := range sg.backends {
 
-		var cb *circuitbreaker.CircuitBreaker
-		if len(sg.tcb) > i {
-			cb = sg.tcb[i]
-		}
-		if cb != nil && !cb.Ready() {
+		if backend.CB() != nil && !backend.CB().Ready() {
 			continue
 		}
 
 		sg.wg.Add(1)
-		go func(target T, tcb *circuitbreaker.CircuitBreaker) {
+		go func(target B) {
 			defer sg.wg.Done()
 
 			select {
@@ -44,11 +37,11 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 			cctx, cancel := context.WithTimeout(ctx, sg.maxWait)
 			sout, err := forEach(cctx, target)
 			cancel()
-			if tcb != nil {
-				err = tcb.Done(cctx, err)
+			if target.CB() != nil {
+				err = target.CB().Done(cctx, err)
 			}
 			if err != nil {
-				log.Errorw("failed to scatter on target", "target", target, "err", err, "maxWait", sg.maxWait)
+				log.Errorw("failed to scatter on target", "target", target.URL().Host, "err", err, "maxWait", sg.maxWait)
 				return
 			}
 			if sout != nil {
@@ -57,7 +50,7 @@ func (sg *scatterGather[T, R]) scatter(ctx context.Context, forEach func(context
 				case sg.out <- *sout:
 				}
 			}
-		}(t, cb)
+		}(backend)
 	}
 	go func() {
 		defer close(sg.out)

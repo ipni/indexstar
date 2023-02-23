@@ -5,23 +5,19 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"testing"
 
 	"github.com/ipfs/go-cid"
 	drp "github.com/ipfs/go-delegated-routing/gen/proto"
 	finderhttpclient "github.com/ipni/storetheindex/api/v0/finder/client/http"
-	"github.com/mercari/go-circuitbreaker"
 	"github.com/stretchr/testify/require"
 )
 
 func doServe(ctx context.Context, bound net.Listener) {
-	surls := make([]*url.URL, 0, 1)
-	surl, err := url.Parse("https://cid.contact/")
+	backends, err := loadBackends([]string{"https://cid.contact/"}, nil)
 	if err != nil {
 		return
 	}
-	surls = append(surls, surl)
 
 	b2, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -33,9 +29,8 @@ func doServe(ctx context.Context, bound net.Listener) {
 		Client:           *http.DefaultClient,
 		Listener:         bound,
 		metricsListener:  b2,
-		servers:          surls,
-		serverCallers:    []*circuitbreaker.CircuitBreaker{circuitbreaker.New()},
-		base:             httputil.NewSingleHostReverseProxy(surls[0]),
+		backends:         backends,
+		base:             httputil.NewSingleHostReverseProxy(backends[0].URL()),
 		translateReframe: true,
 	}
 	s.Serve()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/url"
 	"path"
 
 	"github.com/ipfs/go-cid"
@@ -15,7 +14,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 )
 
-func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
+func NewReframeHTTPHandler(backends []Backend) (http.HandlerFunc, error) {
 	svc, err := NewReframeService(backends)
 	if err != nil {
 		return nil, err
@@ -23,7 +22,7 @@ func NewReframeHTTPHandler(backends []*url.URL) (http.HandlerFunc, error) {
 	return drserver.DelegatedRoutingAsyncHandler(svc), nil
 }
 
-func NewReframeService(backends []*url.URL) (*ReframeService, error) {
+func NewReframeService(backends []Backend) (*ReframeService, error) {
 	httpClient := http.Client{
 		Timeout:   config.Reframe.HttpClientTimeout,
 		Transport: reframeRoundTripper(),
@@ -32,7 +31,7 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 	clients := make([]*backendDelegatedRoutingClient, 0, len(backends))
 	for _, b := range backends {
 		// TODO: replace with URL.JoinPath once upgraded to go 1.19
-		endpoint := path.Join(b.String(), "reframe")
+		endpoint := path.Join(b.URL().String(), "reframe")
 		q, err := drproto.New_DelegatedRouting_Client(endpoint, drproto.DelegatedRouting_Client_WithHTTPClient(&httpClient))
 		if err != nil {
 			return nil, err
@@ -42,8 +41,8 @@ func NewReframeService(backends []*url.URL) (*ReframeService, error) {
 			return nil, err
 		}
 		clients = append(clients, &backendDelegatedRoutingClient{
-			DelegatedRoutingClient: drc,
-			url:                    b,
+			Backend: b,
+			client:  drc,
 		})
 	}
 	return &ReframeService{clients}, nil
@@ -69,21 +68,24 @@ type ReframeService struct {
 }
 
 type backendDelegatedRoutingClient struct {
-	drclient.DelegatedRoutingClient
-	url *url.URL
+	Backend
+	client drclient.DelegatedRoutingClient
 }
 
 func (x *ReframeService) FindProviders(ctx context.Context, key cid.Cid) (<-chan drclient.FindProvidersAsyncResult, error) {
 	sg := &scatterGather[*backendDelegatedRoutingClient, drclient.FindProvidersAsyncResult]{
-		targets: x.backends,
-		maxWait: config.Reframe.ResultMaxWait,
+		backends: x.backends,
+		maxWait:  config.Reframe.ResultMaxWait,
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	if err := sg.scatter(ctx, func(cctx context.Context, b *backendDelegatedRoutingClient) (*drclient.FindProvidersAsyncResult, error) {
-		ch, err := b.FindProvidersAsync(cctx, key)
+		if !b.Matches(nil) {
+			return nil, nil
+		}
+		ch, err := b.client.FindProvidersAsync(cctx, key)
 		if err != nil {
 			return nil, err
 		}

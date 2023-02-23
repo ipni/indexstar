@@ -30,7 +30,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, server := range s.servers {
+	for _, backend := range s.backends {
 		wg.Add(1)
 		go func(server *url.URL) {
 			defer wg.Done()
@@ -72,7 +72,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 			default:
 				log.Warn("unexpected response while getting providers")
 			}
-		}(server)
+		}(backend.URL())
 	}
 	go func() {
 		wg.Wait()
@@ -122,7 +122,7 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, server := range s.servers {
+	for _, backend := range s.backends {
 		wg.Add(1)
 		go func(server *url.URL) {
 			defer wg.Done()
@@ -162,7 +162,7 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 			default:
 				log.Warn("unexpected response while getting provider")
 			}
-		}(server)
+		}(backend.URL())
 	}
 	go func() {
 		wg.Wait()
