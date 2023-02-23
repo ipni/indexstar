@@ -23,23 +23,27 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:      "config",
-				Usage:     "config file",
+				Usage:     "Path to config file",
 				TakesFile: true,
 			},
 			&cli.StringFlag{
 				Name:  "listen",
-				Usage: "listen address",
+				Usage: "HTTP server Listen address",
 				Value: ":8080",
 			},
 			&cli.StringFlag{
 				Name:  "metrics",
-				Usage: "metrics address",
+				Usage: "Metrics server listen address",
 				Value: ":8081",
 			},
 			&cli.StringSliceFlag{
 				Name:  "backends",
-				Usage: "backends to use",
+				Usage: "Backends to propagate requests to.",
 				Value: cli.NewStringSlice("https://cid.contact/"),
+			},
+			&cli.StringSliceFlag{
+				Name:  "cascadeBackends",
+				Usage: "Backends to propagate lookup with SERVER_CASCADE_LABELS env var as query parameter",
 			},
 			&cli.BoolFlag{
 				Name:  "translateReframe",
@@ -104,7 +108,7 @@ func main() {
 				case err := <-done:
 					return err
 				case <-reloadSig:
-					err := s.Reload()
+					err := s.Reload(c)
 					if err != nil {
 						log.Warnf("couldn't reload servers: %s", err)
 					}

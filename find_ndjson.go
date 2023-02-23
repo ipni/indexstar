@@ -76,10 +76,9 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		maxWait = config.Server.ResultStreamMaxWait
 	}
 
-	sg := &scatterGather[*url.URL, any]{
-		targets: s.servers,
-		tcb:     s.serverCallers,
-		maxWait: maxWait,
+	sg := &scatterGather[Backend, any]{
+		backends: s.backends,
+		maxWait:  maxWait,
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -87,12 +86,12 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 	resultsChan := make(chan *encryptedOrPlainResult, 1)
 	var count int32
-	if err := sg.scatter(ctx, func(cctx context.Context, b *url.URL) (*any, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
-		endpoint.Host = b.Host
-		endpoint.Scheme = b.Scheme
+		endpoint.Host = b.URL().Host
+		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
 
 		req, err := http.NewRequestWithContext(cctx, http.MethodGet, endpoint.String(), nil)
@@ -102,6 +101,11 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeNDJson)
+
+		if !b.Matches(req) {
+			return nil, nil
+		}
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend", "err", err)
@@ -119,7 +123,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 			body := string(bb)
 			log := log.With("status", resp.StatusCode, "body", body)
 			log.Warn("Request processing was not successful")
-			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.Host)
+			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
 			if resp.StatusCode < http.StatusInternalServerError {
 				err = circuitbreaker.MarkAsSuccess(err)
 			}
@@ -182,15 +186,27 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	encoder := json.NewEncoder(w)
 	results := newResultSet()
 
+	// Results chan is done when gathering is finished.
+	// Do this in a separate goroutine to avoid potentially closing results chan twice.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-sg.gather(ctx):
+				if !ok {
+					close(resultsChan)
+					return
+				}
+			}
+		}
+	}()
+
 LOOP:
 	for {
 		select {
 		case <-ctx.Done():
 			break LOOP
-		case _, ok := <-sg.gather(ctx):
-			if !ok {
-				close(resultsChan)
-			}
 		case result, ok := <-resultsChan:
 			if !ok {
 				break LOOP
