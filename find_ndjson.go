@@ -90,7 +90,7 @@ func (rs *resultStats) observeProviderResult(result *model.ProviderResult) {
 		case multicodec.TransportBitswap:
 			rs.bitswapTransportCount++
 		case multicodec.TransportGraphsyncFilecoinv1:
-			rs.bitswapTransportCount++
+			rs.graphsyncTransportCount++
 		default:
 			// In case new protocols are added to metadata.Default context and this
 			// switch is not updated count them as unknown.
