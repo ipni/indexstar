@@ -9,12 +9,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/mercari/go-circuitbreaker"
+	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
@@ -28,6 +31,12 @@ type (
 	encryptedOrPlainResult struct {
 		model.ProviderResult
 		EncryptedValueKey []byte `json:"EncryptedValueKey,omitempty"`
+	}
+	resultStats struct {
+		encCount                int64
+		bitswapTransportCount   int64
+		graphsyncTransportCount int64
+		unknwonTransportCount   int64
 	}
 )
 
@@ -55,6 +64,74 @@ func (r resultSet) putIfAbsent(p *encryptedOrPlainResult) bool {
 
 func newResultSet() resultSet {
 	return make(map[uint32]struct{})
+}
+
+func (rs *resultStats) observeResult(result *encryptedOrPlainResult) {
+	if len(result.EncryptedValueKey) > 0 {
+		rs.encCount++
+	} else {
+		rs.observeProviderResult(&result.ProviderResult)
+	}
+}
+
+func (rs *resultStats) observeProviderResult(result *model.ProviderResult) {
+	md := metadata.Default.New()
+	if err := md.UnmarshalBinary(result.Metadata); err != nil {
+		// TODO Refactor once there is concrete error type in index-provider
+		if strings.HasPrefix(err.Error(), "unknown transport id") {
+			// There is at least one unknown transport protocol
+			rs.unknwonTransportCount++
+		}
+		// Proceed with checking md, as unmarshal binary may have partially
+		// populated md with known transports
+	}
+	for _, p := range md.Protocols() {
+		switch p {
+		case multicodec.TransportBitswap:
+			rs.bitswapTransportCount++
+		case multicodec.TransportGraphsyncFilecoinv1:
+			rs.bitswapTransportCount++
+		default:
+			// In case new protocols are added to metadata.Default context and this
+			// switch is not updated count them as unknown.
+			rs.unknwonTransportCount++
+		}
+	}
+}
+
+func (rs *resultStats) observeFindResponse(resp *model.FindResponse) {
+	for _, emr := range resp.EncryptedMultihashResults {
+		rs.encCount += int64(len(emr.EncryptedValueKeys))
+	}
+	for _, mhr := range resp.MultihashResults {
+		for _, pr := range mhr.ProviderResults {
+			rs.observeProviderResult(&pr)
+		}
+	}
+}
+
+func (rs *resultStats) reportMetrics(method string) {
+	mt := tag.Insert(metrics.Method, method)
+	if rs.bitswapTransportCount > 0 {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(mt, tag.Insert(metrics.Transport, multicodec.TransportBitswap.String())),
+			stats.WithMeasurements(metrics.FindResponse.M(rs.bitswapTransportCount)))
+	}
+	if rs.graphsyncTransportCount > 0 {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(mt, tag.Insert(metrics.Transport, multicodec.TransportGraphsyncFilecoinv1.String())),
+			stats.WithMeasurements(metrics.FindResponse.M(rs.graphsyncTransportCount)))
+	}
+	if rs.unknwonTransportCount > 0 {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(mt, tag.Insert(metrics.Transport, "unknown")),
+			stats.WithMeasurements(metrics.FindResponse.M(rs.unknwonTransportCount)))
+	}
+	if rs.encCount > 0 {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(mt, tag.Insert(metrics.Transport, "encrypted")),
+			stats.WithMeasurements(metrics.FindResponse.M(rs.encCount)))
+	}
 }
 
 func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash) {
@@ -202,6 +279,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		}
 	}()
 
+	var rs resultStats
 LOOP:
 	for {
 		select {
@@ -216,8 +294,9 @@ LOOP:
 				continue
 			}
 
-			if translateNonStreaming {
+			rs.observeResult(result)
 
+			if translateNonStreaming {
 				if len(result.EncryptedValueKey) > 0 {
 					encValKeys = append(encValKeys, result.EncryptedValueKey)
 				} else {
@@ -248,6 +327,9 @@ LOOP:
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
+
+	rs.reportMetrics(source)
+
 	if translateNonStreaming {
 		var resp model.FindResponse
 		if len(provResults) > 0 {
