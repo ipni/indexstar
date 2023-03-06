@@ -303,6 +303,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 	// TODO: stream out partial response as they come in.
 	var resp model.FindResponse
+	var rs resultStats
 outer:
 	for prov := range sg.gather(ctx) {
 		if len(prov.MultihashResults) > 0 {
@@ -347,6 +348,9 @@ outer:
 	} else {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
 	}
+
+	rs.observeFindResponse(&resp)
+	rs.reportMetrics(source)
 
 	// write out combined.
 	outData, err := model.MarshalFindResponse(&resp)

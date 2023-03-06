@@ -18,10 +18,11 @@ var log = logging.Logger("indexstar/metrics")
 
 // Global Tags
 var (
-	ErrKind, _ = tag.NewKey("errKind")
-	Method, _  = tag.NewKey("method")
-	Found, _   = tag.NewKey("found")
-	Version, _ = tag.NewKey("version")
+	ErrKind, _   = tag.NewKey("errKind")
+	Method, _    = tag.NewKey("method")
+	Found, _     = tag.NewKey("found")
+	Version, _   = tag.NewKey("version")
+	Transport, _ = tag.NewKey("transport")
 )
 
 // Measures
@@ -29,6 +30,7 @@ var (
 	FindLatency                = stats.Float64("indexstar/find/latency", "Time to respond to a find request", stats.UnitMilliseconds)
 	FindBackends               = stats.Float64("indexstar/find/backends", "Backends reached in a find request", stats.UnitDimensionless)
 	FindLoad                   = stats.Int64("indexstar/find/load", "Amount of calls to find", stats.UnitDimensionless)
+	FindResponse               = stats.Int64("indexstar/find/response", "Find response stats", stats.UnitDimensionless)
 	HttpDelegatedRoutingMethod = stats.Int64("indexstar/http_delegated_routing/load", "Amount of HTTP delegated routing calls by tagged method", stats.UnitDimensionless)
 )
 
@@ -48,6 +50,11 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{Method},
 	}
+	findResponseView = &view.View{
+		Measure:     FindResponse,
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{Method, Transport},
+	}
 	httpDelegRoutingMethodView = &view.View{
 		Measure:     HttpDelegatedRoutingMethod,
 		Aggregation: view.Count(),
@@ -62,6 +69,7 @@ func Start(views []*view.View) http.Handler {
 		findLatencyView,
 		findBackendView,
 		findLoadView,
+		findResponseView,
 		httpDelegRoutingMethodView,
 	)
 	if err != nil {
