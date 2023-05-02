@@ -188,6 +188,13 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 			http.Error(w, "", http.StatusBadRequest)
 			return
 		}
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb)
+		if rcode != http.StatusOK {
+			http.Error(w, "", rcode)
+			return
+		}
+		httpserver.WriteJsonResponse(w, http.StatusOK, resp)
+		return
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
