@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
-	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/indexstar/metrics"
-	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
@@ -156,7 +155,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		// In comparison to regular find requests where it's perfectly normal to have different results returned by different IPNI
 		// instances and hence they need to be aggregated.
 		if len(md) > 0 {
-			httpserver.WriteJsonResponse(w, http.StatusOK, md)
+			writeJsonResponse(w, http.StatusOK, md)
 			return
 		}
 	}
@@ -213,7 +212,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 			http.Error(w, "", rcode)
 			return
 		}
-		httpserver.WriteJsonResponse(w, http.StatusOK, resp)
+		writeJsonResponse(w, http.StatusOK, resp)
 	default:
 		// The request must have  specified an explicit media type that we do not support.
 		http.Error(w, "unsupported media type", http.StatusBadRequest)

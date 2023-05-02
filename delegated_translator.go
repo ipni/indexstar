@@ -10,9 +10,8 @@ import (
 	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
-	"github.com/ipni/indexstar/httpserver"
+	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/indexstar/metrics"
-	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
@@ -153,7 +152,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 	}
 
-	httpserver.WriteJsonResponse(w, http.StatusOK, outBytes)
+	writeJsonResponse(w, http.StatusOK, outBytes)
 }
 
 func schemaByProtocolID(p multicodec.Code) string {

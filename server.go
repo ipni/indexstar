@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/ipni/indexstar/httpserver"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
@@ -237,7 +236,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
-	httpserver.WriteJsonResponse(w, http.StatusOK, []byte("ready"))
+	writeJsonResponse(w, http.StatusOK, []byte("ready"))
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -248,4 +247,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
 	r.Header.Set("Host", firstBackend.Host)
 	s.base.ServeHTTP(w, r)
+}
+
+func writeJsonResponse(w http.ResponseWriter, status int, body []byte) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if _, err := w.Write(body); err != nil {
+		log.Errorw("cannot write response", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+	}
 }
