@@ -8,8 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ipni/indexstar/httpserver"
-	"github.com/ipni/storetheindex/api/v0/finder/model"
+	"github.com/ipni/go-libipni/find/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -107,7 +106,7 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	httpserver.WriteJsonResponse(w, http.StatusOK, outData)
+	writeJsonResponse(w, http.StatusOK, outData)
 }
 
 // provider returns most recent state of a single provider.
@@ -196,5 +195,5 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	httpserver.WriteJsonResponse(w, http.StatusOK, outData)
+	writeJsonResponse(w, http.StatusOK, outData)
 }

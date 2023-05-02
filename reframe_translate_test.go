@@ -9,7 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	drp "github.com/ipfs/go-delegated-routing/gen/proto"
-	finderhttpclient "github.com/ipni/storetheindex/api/v0/finder/client/http"
+	findhttpclient "github.com/ipni/go-libipni/find/client/http"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,11 +65,11 @@ func TestReframe_IsReachable(t *testing.T) {
 				t.Log(p.ProviderNode.Peer.ID)
 			}
 		}
-		client, err := finderhttpclient.New(base)
+		client, err := findhttpclient.New(base)
 		require.NoError(t, err)
 		find, err := client.Find(ctx, c.Hash())
 		require.NoError(t, err)
-		t.Log("found via mh finder", len(find.MultihashResults))
+		t.Log("found via mh find", len(find.MultihashResults))
 		require.Equal(t, len(find.MultihashResults), len(providers))
 	}
 }

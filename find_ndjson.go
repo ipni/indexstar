@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/filecoin-project/index-provider/metadata"
+	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/indexstar/metrics"
-	"github.com/ipni/storetheindex/api/v0/finder/model"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
