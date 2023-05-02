@@ -29,6 +29,11 @@ type server struct {
 	translateNonStreaming bool
 }
 
+// caskadeBackend is a marker for caskade backends
+type caskadeBackend struct {
+	Backend
+}
+
 func NewServer(c *cli.Context) (*server, error) {
 	bound, err := net.Listen("tcp", c.String("listen"))
 	if err != nil {
@@ -124,7 +129,7 @@ func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate cascade backend: %w", err)
 		}
-		backends = append(backends, b)
+		backends = append(backends, caskadeBackend{Backend: b})
 	}
 
 	if len(backends) == 0 {

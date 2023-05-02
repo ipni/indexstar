@@ -18,11 +18,13 @@ var log = logging.Logger("indexstar/metrics")
 
 // Global Tags
 var (
-	ErrKind, _   = tag.NewKey("errKind")
-	Method, _    = tag.NewKey("method")
-	Found, _     = tag.NewKey("found")
-	Version, _   = tag.NewKey("version")
-	Transport, _ = tag.NewKey("transport")
+	ErrKind, _      = tag.NewKey("errKind")
+	Method, _       = tag.NewKey("method")
+	Found, _        = tag.NewKey("found")
+	FoundCaskade, _ = tag.NewKey("foundCaskade")
+	FoundRegular, _ = tag.NewKey("foundRegular")
+	Version, _      = tag.NewKey("version")
+	Transport, _    = tag.NewKey("transport")
 )
 
 // Measures
@@ -39,7 +41,7 @@ var (
 	findLatencyView = &view.View{
 		Measure:     FindLatency,
 		Aggregation: view.Distribution(0, 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 1000, 2000, 5000),
-		TagKeys:     []tag.Key{Method, Found},
+		TagKeys:     []tag.Key{Method, Found, FoundCaskade, FoundRegular},
 	}
 	findBackendView = &view.View{
 		Measure:     FindBackends,
