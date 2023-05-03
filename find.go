@@ -235,8 +235,8 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 	// sgResponse is a struct that exists to capture the backend that the response has been received from
 	type sgResponse struct {
-		r *model.FindResponse
-		b Backend
+		rsp  *model.FindResponse
+		bknd Backend
 	}
 
 	sg := &scatterGather[Backend, sgResponse]{
@@ -288,7 +288,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			if err != nil {
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
-			return &sgResponse{b: b, r: providers}, nil
+			return &sgResponse{bknd: b, rsp: providers}, nil
 		case http.StatusNotFound:
 			atomic.AddInt32(&count, 1)
 			return nil, nil
@@ -313,22 +313,22 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	var foundRegular, foundCaskade bool
 outer:
 	for r := range sg.gather(ctx) {
-		if len(r.r.MultihashResults) > 0 {
+		if len(r.rsp.MultihashResults) > 0 {
 			if resp.MultihashResults == nil {
-				resp.MultihashResults = r.r.MultihashResults
+				resp.MultihashResults = r.rsp.MultihashResults
 			} else {
-				if !bytes.Equal(resp.MultihashResults[0].Multihash, r.r.MultihashResults[0].Multihash) {
+				if !bytes.Equal(resp.MultihashResults[0].Multihash, r.rsp.MultihashResults[0].Multihash) {
 					// weird / invalid.
-					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", r.r.MultihashResults[0].Multihash)
+					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", r.rsp.MultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
-				for _, pr := range r.r.MultihashResults[0].ProviderResults {
+				for _, pr := range r.rsp.MultihashResults[0].ProviderResults {
 					for _, rr := range resp.MultihashResults[0].ProviderResults {
 						if bytes.Equal(rr.ContextID, pr.ContextID) && bytes.Equal([]byte(rr.Provider.ID), []byte(pr.Provider.ID)) {
 							continue outer
 						}
 					}
-					_, isCaskade := r.b.(caskadeBackend)
+					_, isCaskade := r.bknd.(caskadeBackend)
 					foundCaskade = foundCaskade || isCaskade
 					foundRegular = foundRegular || !isCaskade
 
@@ -337,19 +337,19 @@ outer:
 			}
 		}
 
-		if len(r.r.EncryptedMultihashResults) > 0 {
+		if len(r.rsp.EncryptedMultihashResults) > 0 {
 			if resp.EncryptedMultihashResults == nil {
-				resp.EncryptedMultihashResults = r.r.EncryptedMultihashResults
+				resp.EncryptedMultihashResults = r.rsp.EncryptedMultihashResults
 			} else {
-				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, r.r.EncryptedMultihashResults[0].Multihash) {
-					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.r.EncryptedMultihashResults[0].Multihash)
+				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, r.rsp.EncryptedMultihashResults[0].Multihash) {
+					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.rsp.EncryptedMultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
-				_, isCaskade := r.b.(caskadeBackend)
+				_, isCaskade := r.bknd.(caskadeBackend)
 				foundCaskade = foundCaskade || isCaskade
 				foundRegular = foundRegular || !isCaskade
 
-				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, r.r.EncryptedMultihashResults[0].EncryptedValueKeys...)
+				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, r.rsp.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
 		}
 	}
@@ -362,16 +362,15 @@ outer:
 		return http.StatusNotFound, nil
 	} else {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
-		if foundCaskade {
-			latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, "yes"))
-		} else {
-			latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, "no"))
+		yesno := func(yn bool) string {
+			if yn {
+				return "yes"
+			}
+			return "no"
 		}
-		if foundRegular {
-			latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, "yes"))
-		} else {
-			latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, "no"))
-		}
+
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 	}
 
 	rs.observeFindResponse(&resp)
