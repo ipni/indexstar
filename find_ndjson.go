@@ -161,7 +161,12 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	resultsChan := make(chan *encryptedOrPlainResult, 1)
+	type resultWithBackend struct {
+		rslt *encryptedOrPlainResult
+		bknd Backend
+	}
+
+	resultsChan := make(chan *resultWithBackend, 1)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// Copy the URL from original request and override host/schema to point
@@ -232,7 +237,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 					select {
 					case <-cctx.Done():
 						return nil, nil
-					case resultsChan <- &result:
+					case resultsChan <- &resultWithBackend{rslt: &result, bknd: b}:
 					}
 					continue
 				}
@@ -280,21 +285,27 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	}()
 
 	var rs resultStats
+	var foundCaskade, foundRegular bool
 LOOP:
 	for {
 		select {
 		case <-ctx.Done():
 			break LOOP
-		case result, ok := <-resultsChan:
+		case rwb, ok := <-resultsChan:
 			if !ok {
 				break LOOP
 			}
+			result := rwb.rslt
 			absent := results.putIfAbsent(result)
 			if !absent {
 				continue
 			}
 
 			rs.observeResult(result)
+
+			_, isCaskade := rwb.bknd.(caskadeBackend)
+			foundCaskade = foundCaskade || isCaskade
+			foundRegular = foundRegular || !isCaskade
 
 			if translateNonStreaming {
 				if len(result.EncryptedValueKey) > 0 {
@@ -353,4 +364,13 @@ LOOP:
 		}
 	}
 	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
+	yesno := func(yn bool) string {
+		if yn {
+			return "yes"
+		}
+		return "no"
+	}
+
+	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
+	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 }
