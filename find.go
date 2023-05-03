@@ -233,7 +233,13 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
 
-	sg := &scatterGather[Backend, *model.FindResponse]{
+	// sgResponse is a struct that exists to capture the backend that the response has been received from
+	type sgResponse struct {
+		rsp  *model.FindResponse
+		bknd Backend
+	}
+
+	sg := &scatterGather[Backend, sgResponse]{
 		backends: s.backends,
 		maxWait:  config.Server.ResultMaxWait,
 	}
@@ -242,7 +248,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	defer cancel()
 
 	var count int32
-	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (**model.FindResponse, error) {
+	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*sgResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
@@ -282,7 +288,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			if err != nil {
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
-			return &providers, nil
+			return &sgResponse{bknd: b, rsp: providers}, nil
 		case http.StatusNotFound:
 			atomic.AddInt32(&count, 1)
 			return nil, nil
@@ -304,37 +310,46 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	// TODO: stream out partial response as they come in.
 	var resp model.FindResponse
 	var rs resultStats
+	var foundRegular, foundCaskade bool
 outer:
-	for prov := range sg.gather(ctx) {
-		if len(prov.MultihashResults) > 0 {
+	for r := range sg.gather(ctx) {
+		if len(r.rsp.MultihashResults) > 0 {
 			if resp.MultihashResults == nil {
-				resp.MultihashResults = prov.MultihashResults
+				resp.MultihashResults = r.rsp.MultihashResults
 			} else {
-				if !bytes.Equal(resp.MultihashResults[0].Multihash, prov.MultihashResults[0].Multihash) {
+				if !bytes.Equal(resp.MultihashResults[0].Multihash, r.rsp.MultihashResults[0].Multihash) {
 					// weird / invalid.
-					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", prov.MultihashResults[0].Multihash)
+					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", r.rsp.MultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
-				for _, pr := range prov.MultihashResults[0].ProviderResults {
+				for _, pr := range r.rsp.MultihashResults[0].ProviderResults {
 					for _, rr := range resp.MultihashResults[0].ProviderResults {
 						if bytes.Equal(rr.ContextID, pr.ContextID) && bytes.Equal([]byte(rr.Provider.ID), []byte(pr.Provider.ID)) {
 							continue outer
 						}
 					}
+					_, isCaskade := r.bknd.(caskadeBackend)
+					foundCaskade = foundCaskade || isCaskade
+					foundRegular = foundRegular || !isCaskade
+
 					resp.MultihashResults[0].ProviderResults = append(resp.MultihashResults[0].ProviderResults, pr)
 				}
 			}
 		}
 
-		if len(prov.EncryptedMultihashResults) > 0 {
+		if len(r.rsp.EncryptedMultihashResults) > 0 {
 			if resp.EncryptedMultihashResults == nil {
-				resp.EncryptedMultihashResults = prov.EncryptedMultihashResults
+				resp.EncryptedMultihashResults = r.rsp.EncryptedMultihashResults
 			} else {
-				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, prov.EncryptedMultihashResults[0].Multihash) {
-					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", prov.EncryptedMultihashResults[0].Multihash)
+				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, r.rsp.EncryptedMultihashResults[0].Multihash) {
+					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.rsp.EncryptedMultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
-				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, prov.EncryptedMultihashResults[0].EncryptedValueKeys...)
+				_, isCaskade := r.bknd.(caskadeBackend)
+				foundCaskade = foundCaskade || isCaskade
+				foundRegular = foundRegular || !isCaskade
+
+				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, r.rsp.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
 		}
 	}
@@ -347,6 +362,15 @@ outer:
 		return http.StatusNotFound, nil
 	} else {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
+		yesno := func(yn bool) string {
+			if yn {
+				return "yes"
+			}
+			return "no"
+		}
+
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 	}
 
 	rs.observeFindResponse(&resp)
