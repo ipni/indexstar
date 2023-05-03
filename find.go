@@ -193,7 +193,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 			http.Error(w, "", rcode)
 			return
 		}
-		httpserver.WriteJsonResponse(w, http.StatusOK, resp)
+		writeJsonResponse(w, http.StatusOK, resp)
 		return
 	default:
 		discardBody(r)
