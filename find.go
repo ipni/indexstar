@@ -317,11 +317,18 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	var resp model.FindResponse
 	var rs resultStats
 	var foundRegular, foundCaskade bool
+	updateFoundFlags := func(b Backend) {
+		_, isCaskade := b.(caskadeBackend)
+		foundCaskade = foundCaskade || isCaskade
+		foundRegular = foundRegular || !isCaskade
+	}
+
 outer:
 	for r := range sg.gather(ctx) {
 		if len(r.rsp.MultihashResults) > 0 {
 			if resp.MultihashResults == nil {
 				resp.MultihashResults = r.rsp.MultihashResults
+				updateFoundFlags(r.bknd)
 			} else {
 				if !bytes.Equal(resp.MultihashResults[0].Multihash, r.rsp.MultihashResults[0].Multihash) {
 					// weird / invalid.
@@ -334,10 +341,7 @@ outer:
 							continue outer
 						}
 					}
-					_, isCaskade := r.bknd.(caskadeBackend)
-					foundCaskade = foundCaskade || isCaskade
-					foundRegular = foundRegular || !isCaskade
-
+					updateFoundFlags(r.bknd)
 					resp.MultihashResults[0].ProviderResults = append(resp.MultihashResults[0].ProviderResults, pr)
 				}
 			}
@@ -346,15 +350,13 @@ outer:
 		if len(r.rsp.EncryptedMultihashResults) > 0 {
 			if resp.EncryptedMultihashResults == nil {
 				resp.EncryptedMultihashResults = r.rsp.EncryptedMultihashResults
+				updateFoundFlags(r.bknd)
 			} else {
 				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, r.rsp.EncryptedMultihashResults[0].Multihash) {
 					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.rsp.EncryptedMultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
-				_, isCaskade := r.bknd.(caskadeBackend)
-				foundCaskade = foundCaskade || isCaskade
-				foundRegular = foundRegular || !isCaskade
-
+				updateFoundFlags(r.bknd)
 				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, r.rsp.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
 		}
