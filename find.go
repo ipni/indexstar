@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -282,8 +283,13 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		}
 		defer resp.Body.Close()
 		data, err := io.ReadAll(resp.Body)
+
 		if err != nil {
-			log.Warnw("Failed to read backend response", "err", err)
+			if errors.Is(err, context.Canceled) {
+				log.Info("Failed to read backend response because of cancelled context")
+			} else {
+				log.Warnw("Failed to read backend response", "err", err)
+			}
 			return nil, err
 		}
 

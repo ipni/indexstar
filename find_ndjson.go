@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -242,7 +243,12 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 					continue
 				}
 				if err := scanner.Err(); err != nil {
-					log.Warnw("Failed to read backend response", "err", err)
+					if errors.Is(err, context.Canceled) {
+						log.Info("Failed to read backend response because of cancelled context")
+					} else {
+						log.Warnw("Failed to read backend response", "err", err)
+					}
+
 					return nil, circuitbreaker.MarkAsSuccess(err)
 				}
 				return nil, nil
