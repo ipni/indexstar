@@ -26,6 +26,7 @@ const (
 	findMethodOrig      = "http-v0"
 	findMethodReframe   = "reframe-v1"
 	findMethodDelegated = "delegated-v1"
+	shardKeyHeader      = "x-ipni-dhstore-shard-key"
 )
 
 func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +99,8 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		maxWait:  config.Server.ResultMaxWait,
 	}
 
+	shardKey := extractShardingKey(r.URL.Path)
+
 	// TODO: wait for the first successful response instead
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
 		// Copy the URL from original request and override host/schema to point
@@ -114,6 +117,12 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeJson)
+
+		if len(shardKey) > 0 {
+			// set sharding key header
+			req.Header.Set(shardKeyHeader, shardKey)
+		}
+
 		if !b.Matches(req) {
 			return nil, nil
 		}
@@ -255,6 +264,19 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	defer cancel()
 
 	var count int32
+
+	// if this is a get method - extract cid / multihash and add it as a shard key.
+	// TODO: how do we handle post methods?
+	var shardKey string
+	if method == http.MethodGet {
+		// cid.Decode can parse both cid and mutihash. If it's a multihash it would be treated as a base58 string.
+		c, err := cid.Decode(extractShardingKey(req.Path))
+		if err != nil {
+			log.Errorw("Failed to parse cid / multihash from the request. Not setting shard key.", "err", err)
+		} else {
+			shardKey = c.Hash().B58String()
+		}
+	}
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*sgResponse, error) {
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
@@ -271,6 +293,11 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeJson)
+
+		// sharding keys might be empty for post requests
+		if len(shardKey) > 0 {
+			req.Header.Set(shardKeyHeader, shardKey)
+		}
 
 		if !b.Matches(req) {
 			return nil, nil
@@ -421,4 +448,9 @@ func handleIPNIOptions(w http.ResponseWriter, post bool) {
 func discardBody(r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	_ = r.Body.Close()
+}
+
+// extractShardingKey extracts the sharding key from the supplied URL for metadata, cid and multihash lookups
+func extractShardingKey(s string) string {
+	return path.Base(s)
 }

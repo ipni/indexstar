@@ -184,6 +184,8 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		}
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("Accept", mediaTypeNDJson)
+		// set sharding key header
+		req.Header.Set(shardKeyHeader, mh.B58String())
 
 		if !b.Matches(req) {
 			return nil, nil
