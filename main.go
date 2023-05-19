@@ -45,6 +45,10 @@ func main() {
 				Name:  "cascadeBackends",
 				Usage: "Backends to propagate lookup with SERVER_CASCADE_LABELS env var as query parameter",
 			},
+			&cli.StringFlag{
+				Name:  "fallbackBackend",
+				Usage: "Fallback Backend is used for requests to the index page",
+			},
 			&cli.BoolFlag{
 				Name:  "translateReframe",
 				Usage: "translate reframe requests into find requests to backends",

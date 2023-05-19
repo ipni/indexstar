@@ -22,6 +22,7 @@ type server struct {
 	net.Listener
 	metricsListener       net.Listener
 	cfgBase               string
+	fallbackBackend       string
 	backends              []Backend
 	base                  http.Handler
 	translateReframe      bool
@@ -72,6 +73,13 @@ func NewServer(c *cli.Context) (*server, error) {
 		return dialer.DialContext(ctx, network, addr)
 	}
 
+	fallback := backends[0].URL()
+	for _, b := range backends {
+		if b.URL().Host == c.String("fallbackBackend") {
+			fallback = b.URL()
+		}
+	}
+
 	return &server{
 		Context: c.Context,
 		Client: http.Client{
@@ -79,10 +87,11 @@ func NewServer(c *cli.Context) (*server, error) {
 			Transport: t,
 		},
 		cfgBase:               c.String("config"),
+		fallbackBackend:       c.String("fallbackBackend"),
 		Listener:              bound,
 		metricsListener:       mb,
 		backends:              backends,
-		base:                  httputil.NewSingleHostReverseProxy(backends[0].URL()),
+		base:                  httputil.NewSingleHostReverseProxy(fallback),
 		translateReframe:      c.Bool("translateReframe"),
 		translateNonStreaming: c.Bool("translateNonStreaming"),
 	}, nil
@@ -147,7 +156,15 @@ func (s *server) Reload(cctx *cli.Context) error {
 		return err
 	}
 	s.backends = b
-	s.base = httputil.NewSingleHostReverseProxy(b[0].URL())
+
+	fallback := b[0].URL()
+	for _, be := range b {
+		if be.URL().Host == s.fallbackBackend {
+			fallback = be.URL()
+		}
+	}
+
+	s.base = httputil.NewSingleHostReverseProxy(fallback)
 	return nil
 }
 
@@ -241,11 +258,17 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// default behavior.
-	firstBackend := s.backends[0].URL()
-	r.URL.Host = firstBackend.Host
-	r.URL.Scheme = firstBackend.Scheme
+	fallback := s.backends[0].URL()
+	for _, be := range s.backends {
+		if be.URL().Host == s.fallbackBackend {
+			fallback = be.URL()
+		}
+	}
+
+	r.URL.Host = fallback.Host
+	r.URL.Scheme = fallback.Scheme
 	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-	r.Header.Set("Host", firstBackend.Host)
+	r.Header.Set("Host", fallback.Host)
 	s.base.ServeHTTP(w, r)
 }
 
