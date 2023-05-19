@@ -10,7 +10,7 @@ on:
       - 'docs/**'
     branches:
       - main
-
+      - ivan/add-sharding-key
 jobs:
   publisher:
     if: ${{ github.event.pusher.name != 'sti-bot' }}
