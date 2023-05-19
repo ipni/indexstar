@@ -10,6 +10,7 @@ on:
       - 'docs/**'
     branches:
       - main
+      # See https://github.com/ipni/indexstar/pull/105
       - ivan/add-sharding-key
 jobs:
   publisher:
