@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/url"
@@ -125,18 +126,18 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 	// Records returned from IPNI via Delegated Routing don't have ContextID in them. Becuase of that,
 	// some records that are valid from the IPNI point of view might look like duplicates from the Delegated Routing point of view.
 	// To make the Delegated Routing output nicer, deduplicate identical records.
-	uniqueProviders := map[string]struct{}{}
+	uniqueProviders := map[uint32]struct{}{}
 	appendIfUnique := func(drp *drProvider) {
 		drpb := make([]byte, 0, len(drp.ID)+len(drp.Protocol)+len(drp.Schema)+len(drp.Metadata))
 		drpb = append(drpb, []byte(drp.ID)...)
 		drpb = append(drpb, []byte(drp.Protocol)...)
 		drpb = append(drpb, []byte(drp.Schema)...)
 		drpb = append(drpb, drp.Metadata...)
-		drps := string(drpb)
-		if _, ok := uniqueProviders[drps]; ok {
+		key := crc32.ChecksumIEEE(drpb)
+		if _, ok := uniqueProviders[key]; ok {
 			return
 		}
-		uniqueProviders[drps] = struct{}{}
+		uniqueProviders[key] = struct{}{}
 		out.Providers = append(out.Providers, *drp)
 	}
 
