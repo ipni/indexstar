@@ -121,11 +121,30 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 	res := parsed.MultihashResults[0]
 
 	out := drResp{}
+
+	// Records returned from IPNI via Delegated Routing don't have ContextID in them. Becuase of that,
+	// some records that are valid from the IPNI point of view might look like duplicates from the Delegated Routing point of view.
+	// To make the Delegated Routing output nicer, deduplicate identical records.
+	uniqueProviders := map[string]struct{}{}
+	appendIfUnique := func(drp *drProvider) {
+		drpb := make([]byte, 0, len(drp.ID)+len(drp.Protocol)+len(drp.Schema)+len(drp.Metadata))
+		drpb = append(drpb, []byte(drp.ID)...)
+		drpb = append(drpb, []byte(drp.Protocol)...)
+		drpb = append(drpb, []byte(drp.Schema)...)
+		drpb = append(drpb, drp.Metadata...)
+		drps := string(drpb)
+		if _, ok := uniqueProviders[drps]; ok {
+			return
+		}
+		uniqueProviders[drps] = struct{}{}
+		out.Providers = append(out.Providers, *drp)
+	}
+
 	for _, p := range res.ProviderResults {
 		md := metadata.Default.New()
 		err := md.UnmarshalBinary(p.Metadata)
 		if err != nil {
-			out.Providers = append(out.Providers, drProvider{
+			appendIfUnique(&drProvider{
 				Protocol: unknownProtocol,
 				Schema:   unknownSchema,
 				ID:       p.Provider.ID,
@@ -135,7 +154,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 			for _, proto := range md.Protocols() {
 				pl := md.Get(proto)
 				plb, _ := pl.MarshalBinary()
-				out.Providers = append(out.Providers, drProvider{
+				appendIfUnique(&drProvider{
 					Protocol: proto.String(),
 					Schema:   schemaByProtocolID(proto),
 					ID:       p.Provider.ID,
