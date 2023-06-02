@@ -322,11 +322,15 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	// TODO: stream out partial response as they come in.
 	var resp model.FindResponse
 	var rs resultStats
-	var foundRegular, foundCaskade bool
+	var foundRegular, foundCaskade, foundDh bool
 	updateFoundFlags := func(b Backend) {
 		_, isCaskade := b.(caskadeBackend)
+		_, isDh := b.(dhBackend)
+		isRegular := !isCaskade && !isDh
+
 		foundCaskade = foundCaskade || isCaskade
-		foundRegular = foundRegular || !isCaskade
+		foundRegular = foundRegular || isRegular
+		foundDh = foundDh || isDh
 	}
 
 outer:
@@ -385,6 +389,7 @@ outer:
 
 		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
 		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundDh, yesno(foundDh)))
 	}
 
 	rs.observeFindResponse(&resp)

@@ -14,7 +14,7 @@ import (
 )
 
 func doServe(ctx context.Context, bound net.Listener) {
-	backends, err := loadBackends([]string{"https://cid.contact/"}, nil)
+	backends, err := loadBackends([]string{"https://cid.contact/"}, nil, nil)
 	if err != nil {
 		return
 	}

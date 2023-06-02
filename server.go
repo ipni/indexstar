@@ -34,6 +34,11 @@ type caskadeBackend struct {
 	Backend
 }
 
+// dhBackend is a marker for double hashed backends
+type dhBackend struct {
+	Backend
+}
+
 func NewServer(c *cli.Context) (*server, error) {
 	bound, err := net.Listen("tcp", c.String("listen"))
 	if err != nil {
@@ -45,6 +50,7 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 	servers := c.StringSlice("backends")
 	cascadeServers := c.StringSlice("cascadeBackends")
+	dhServers := c.StringSlice("dhBackends")
 
 	if len(servers) == 0 {
 		if !c.IsSet("config") {
@@ -56,7 +62,7 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 	}
 
-	backends, err := loadBackends(servers, cascadeServers)
+	backends, err := loadBackends(servers, cascadeServers, dhServers)
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +103,11 @@ func NewServer(c *cli.Context) (*server, error) {
 	}, nil
 }
 
-func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
+func loadBackends(servers, cascadeServers, dhServers []string) ([]Backend, error) {
 	var backends []Backend
-	for _, s := range servers {
-		b, err := NewBackend(s, circuitbreaker.New(
+
+	newBackendFunc := func(s string) (Backend, error) {
+		return NewBackend(s, circuitbreaker.New(
 			circuitbreaker.WithFailOnContextCancel(false),
 			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
 			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
@@ -108,10 +115,20 @@ func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
 			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
 				log.Infof("circuit state for %s changed from %s to %s", s, from, to)
 			})), Matchers.Any)
+	}
+	for _, s := range servers {
+		b, err := newBackendFunc(s)
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate backend: %w", err)
 		}
 		backends = append(backends, b)
+	}
+	for _, s := range dhServers {
+		b, err := newBackendFunc(s)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate dh backend: %w", err)
+		}
+		backends = append(backends, dhBackend{b})
 	}
 
 	for _, cs := range cascadeServers {
@@ -151,7 +168,7 @@ func (s *server) Reload(cctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	b, err := loadBackends(surls, cctx.StringSlice("cascadeBackends"))
+	b, err := loadBackends(surls, cctx.StringSlice("cascadeBackends"), cctx.StringSlice("dhBackends"))
 	if err != nil {
 		return err
 	}

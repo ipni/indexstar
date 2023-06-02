@@ -291,7 +291,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	}()
 
 	var rs resultStats
-	var foundCaskade, foundRegular bool
+	var foundCaskade, foundRegular, foundDh bool
 LOOP:
 	for {
 		select {
@@ -310,8 +310,12 @@ LOOP:
 			rs.observeResult(result)
 
 			_, isCaskade := rwb.bknd.(caskadeBackend)
+			_, isDh := rwb.bknd.(dhBackend)
+			isRegular := !isCaskade && !isDh
+
 			foundCaskade = foundCaskade || isCaskade
-			foundRegular = foundRegular || !isCaskade
+			foundRegular = foundRegular || isRegular
+			foundDh = foundDh || isDh
 
 			if translateNonStreaming {
 				if len(result.EncryptedValueKey) > 0 {
@@ -379,4 +383,5 @@ LOOP:
 
 	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
 	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
+	latencyTags = append(latencyTags, tag.Insert(metrics.FoundDh, yesno(foundDh)))
 }
