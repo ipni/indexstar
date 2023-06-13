@@ -15,10 +15,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
 )
 
-type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte) (int, []byte)
+type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash) (int, []byte)
 
 func NewReframeTranslatorHTTPHandler(backend findFunc) (http.HandlerFunc, error) {
 	svc, err := NewReframeTranslatorService(backend)
@@ -47,7 +48,7 @@ func (x *ReframeTranslatorService) FindProviders(ctx context.Context, key cid.Ci
 	go func() {
 		defer close(out)
 
-		respStatus, respJSON := x.findBackend(ctx, "GET", findMethodReframe, req, []byte{})
+		respStatus, respJSON := x.findBackend(ctx, "GET", findMethodReframe, req, []byte{}, key.Hash())
 		if respStatus == http.StatusNotFound {
 			// no responses.
 			return

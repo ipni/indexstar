@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
+	"github.com/ipfs/go-cid"
 	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -96,7 +97,14 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{})
+
+	c, err := cid.Decode(cidUrlParam)
+	if err != nil {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, c.Hash())
 
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
