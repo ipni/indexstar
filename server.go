@@ -16,6 +16,13 @@ import (
 
 var log = logging.Logger("indexstar/mux")
 
+const (
+	backendsArg          = "backends"
+	cascadeBackendsArg   = "cascadeBackends"
+	dhBackendsArg        = "dhBackends"
+	providersBackendsArg = "providersBackends"
+)
+
 type server struct {
 	context.Context
 	http.Client
@@ -34,6 +41,14 @@ type caskadeBackend struct {
 	Backend
 }
 
+type dhBackend struct {
+	Backend
+}
+
+type providersBackend struct {
+	Backend
+}
+
 func NewServer(c *cli.Context) (*server, error) {
 	bound, err := net.Listen("tcp", c.String("listen"))
 	if err != nil {
@@ -43,8 +58,10 @@ func NewServer(c *cli.Context) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers := c.StringSlice("backends")
-	cascadeServers := c.StringSlice("cascadeBackends")
+	servers := c.StringSlice(backendsArg)
+	cascadeServers := c.StringSlice(cascadeBackendsArg)
+	dhServers := c.StringSlice(dhBackendsArg)
+	providersServers := c.StringSlice(providersBackendsArg)
 
 	if len(servers) == 0 {
 		if !c.IsSet("config") {
@@ -56,7 +73,7 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 	}
 
-	backends, err := loadBackends(servers, cascadeServers)
+	backends, err := loadBackends(servers, cascadeServers, dhServers, providersServers)
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +114,10 @@ func NewServer(c *cli.Context) (*server, error) {
 	}, nil
 }
 
-func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
-	var backends []Backend
-	for _, s := range servers {
-		b, err := NewBackend(s, circuitbreaker.New(
+func loadBackends(servers, cascadeServers, dhServers, providersServers []string) ([]Backend, error) {
+
+	newBackendFunc := func(s string) (Backend, error) {
+		return NewBackend(s, circuitbreaker.New(
 			circuitbreaker.WithFailOnContextCancel(false),
 			circuitbreaker.WithHalfOpenMaxSuccesses(int64(config.Circuit.HalfOpenSuccesses)),
 			circuitbreaker.WithOpenTimeout(config.Circuit.OpenTimeout),
@@ -108,10 +125,29 @@ func loadBackends(servers, cascadeServers []string) ([]Backend, error) {
 			circuitbreaker.WithOnStateChangeHookFn(func(from, to circuitbreaker.State) {
 				log.Infof("circuit state for %s changed from %s to %s", s, from, to)
 			})), Matchers.Any)
+	}
+
+	var backends []Backend
+	for _, s := range servers {
+		b, err := newBackendFunc(s)
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate backend: %w", err)
 		}
 		backends = append(backends, b)
+	}
+	for _, s := range dhServers {
+		b, err := newBackendFunc(s)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate dh backend: %w", err)
+		}
+		backends = append(backends, dhBackend{Backend: b})
+	}
+	for _, s := range providersServers {
+		b, err := newBackendFunc(s)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate provider backend: %w", err)
+		}
+		backends = append(backends, providersBackend{Backend: b})
 	}
 
 	for _, cs := range cascadeServers {
@@ -151,7 +187,10 @@ func (s *server) Reload(cctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	b, err := loadBackends(surls, cctx.StringSlice("cascadeBackends"))
+	b, err := loadBackends(surls,
+		cctx.StringSlice(cascadeBackendsArg),
+		cctx.StringSlice(dhBackendsArg),
+		cctx.StringSlice(providersBackendsArg))
 	if err != nil {
 		return err
 	}

@@ -100,6 +100,11 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: wait for the first successful response instead
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
+		// send metadata requests only to dh backends
+		if _, isDhBackend := b.(dhBackend); !isDhBackend {
+			return nil, nil
+		}
+
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
@@ -189,7 +194,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 			http.Error(w, "", http.StatusBadRequest)
 			return
 		}
-		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb)
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb, mh)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -215,7 +220,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
-		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb)
+		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb, mh)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -227,7 +232,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -239,6 +244,12 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			stats.WithTags(loadTags...),
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
+
+	dmh, err := multihash.Decode(mh)
+	if err != nil {
+		log.Warnw("failed to decode multihash", "err", err)
+		return http.StatusInternalServerError, nil
+	}
 
 	// sgResponse is a struct that exists to capture the backend that the response has been received from
 	type sgResponse struct {
@@ -256,6 +267,13 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*sgResponse, error) {
+		// forward double hashed requests to double hashed backends only and regular requests to regular backends
+		_, isDhBackend := b.(dhBackend)
+		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
+			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) {
+			return nil, nil
+		}
+
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req

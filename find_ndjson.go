@@ -147,6 +147,12 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 			stats.WithTags(loadTags...),
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
+	dmh, err := multihash.Decode(mh)
+	if err != nil {
+		log.Errorw("Failed to decode multihash", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
 	var maxWait time.Duration
 	if translateNonStreaming {
 		maxWait = config.Server.ResultMaxWait
@@ -170,6 +176,13 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	resultsChan := make(chan *resultWithBackend, 1)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
+		// forward double hashed requests to double hashed backends only and regular requests to regular backends
+		_, isDhBackend := b.(dhBackend)
+		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
+			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) {
+			return nil, nil
+		}
+
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
 		endpoint := *req
