@@ -178,8 +178,10 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
+		_, isProvidersBackend := b.(providersBackend)
 		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
-			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) {
+			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) ||
+			isProvidersBackend {
 			return nil, nil
 		}
 

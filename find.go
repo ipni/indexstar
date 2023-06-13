@@ -269,8 +269,10 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*sgResponse, error) {
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
+		_, isProvidersBackend := b.(providersBackend)
 		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
-			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) {
+			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) ||
+			isProvidersBackend {
 			return nil, nil
 		}
 
