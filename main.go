@@ -37,13 +37,21 @@ func main() {
 				Value: ":8081",
 			},
 			&cli.StringSliceFlag{
-				Name:  "backends",
-				Usage: "Backends to propagate requests to.",
+				Name:  backendsArg,
+				Usage: "Backends to propagate regular requests to.",
 				Value: cli.NewStringSlice("https://cid.contact/"),
 			},
 			&cli.StringSliceFlag{
-				Name:  "cascadeBackends",
+				Name:  cascadeBackendsArg,
 				Usage: "Backends to propagate lookup with SERVER_CASCADE_LABELS env var as query parameter",
+			},
+			&cli.StringSliceFlag{
+				Name:  dhBackendsArg,
+				Usage: "Backends to propagate Double Hashed requests to.",
+			},
+			&cli.StringSliceFlag{
+				Name:  providersBackendsArg,
+				Usage: "Backends to propagate providers requests to.",
 			},
 			&cli.StringFlag{
 				Name:  "fallbackBackend",
