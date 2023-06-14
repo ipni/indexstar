@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Indexer</title>
+    <style type="text/css">
+*, ::after, ::before {
+  box-sizing: border-box;
+  border: 0 solid;
+}
+body {
+  font-family: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+iframe {
+  position:fixed;
+  top:0; left:0;
+  bottom:0;
+  right:0;
+  width:100vw;
+  height:100vh;
+  border:none;
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  z-index:999999;
+}
+    </style>
+</head>
+<body>
+  <iframe src="{{.URL }}" frameborder="0"></iframe>
+</body>
+</html>
