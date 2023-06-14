@@ -65,6 +65,11 @@ func main() {
 				Name:  "translateNonStreaming",
 				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
 			},
+			&cli.StringFlag{
+				Name:  "homepageURL",
+				Usage: "The actual webUI backend to be rendered via iframe.",
+				Value: "https://web-ipni.cid.contact/",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			exit := make(chan os.Signal, 1)

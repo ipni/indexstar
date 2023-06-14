@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"embed"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"text/template"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipni/indexstar/metrics"
@@ -14,7 +18,12 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var log = logging.Logger("indexstar/mux")
+var (
+	log = logging.Logger("indexstar/mux")
+
+	//go:embed *.html
+	webUI embed.FS
+)
 
 const (
 	backendsArg          = "backends"
@@ -34,6 +43,9 @@ type server struct {
 	base                  http.Handler
 	translateReframe      bool
 	translateNonStreaming bool
+
+	indexPage            []byte
+	indexPageCompileTime time.Time
 }
 
 // caskadeBackend is a marker for caskade backends
@@ -97,6 +109,20 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 	}
 
+	indexTemplate, err := template.ParseFS(webUI, "index.html")
+	if err != nil {
+		return nil, err
+	}
+	var indexPageBuf bytes.Buffer
+	if err = indexTemplate.Execute(&indexPageBuf, struct {
+		URL string
+	}{
+		URL: c.String("homepageURL"),
+	}); err != nil {
+		return nil, err
+	}
+	compileTime := time.Now()
+
 	return &server{
 		Context: c.Context,
 		Client: http.Client{
@@ -111,6 +137,8 @@ func NewServer(c *cli.Context) (*server, error) {
 		base:                  httputil.NewSingleHostReverseProxy(fallback),
 		translateReframe:      c.Bool("translateReframe"),
 		translateNonStreaming: c.Bool("translateNonStreaming"),
+		indexPage:             indexPageBuf.Bytes(),
+		indexPageCompileTime:  compileTime,
 	}, nil
 }
 
@@ -246,7 +274,21 @@ func (s *server) Serve() chan error {
 	// Strip prefix URI since DelegatedTranslator uses a nested mux.
 	mux.Handle("/routing/v1/", http.StripPrefix("/routing/v1", delegated))
 
-	mux.Handle("/", s)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Do not fall back on web-ui on unknown paths. Instead, strictly check the path and
+		// return 404 on anything but "/" and "index.html". Otherwise, paths that are supported by
+		// some backends and not others, like "/metadata" will return text/html.
+		switch r.URL.Path {
+		case "/", "/index.html":
+			if r.Method == http.MethodGet {
+				http.ServeContent(w, r, "index.html", s.indexPageCompileTime, bytes.NewReader(s.indexPage))
+				return
+			}
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		default:
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		}
+	})
 
 	serv := http.Server{
 		Handler: http.MaxBytesHandler(mux, config.Server.MaxRequestBodySize),
