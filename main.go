@@ -58,10 +58,6 @@ func main() {
 				Usage: "Fallback Backend is used for requests to the index page",
 			},
 			&cli.BoolFlag{
-				Name:  "translateReframe",
-				Usage: "translate reframe requests into find requests to backends",
-			},
-			&cli.BoolFlag{
 				Name:  "translateNonStreaming",
 				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
 			},

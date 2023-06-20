@@ -41,7 +41,6 @@ type server struct {
 	fallbackBackend       string
 	backends              []Backend
 	base                  http.Handler
-	translateReframe      bool
 	translateNonStreaming bool
 
 	indexPage            []byte
@@ -135,7 +134,6 @@ func NewServer(c *cli.Context) (*server, error) {
 		metricsListener:       mb,
 		backends:              backends,
 		base:                  httputil.NewSingleHostReverseProxy(fallback),
-		translateReframe:      c.Bool("translateReframe"),
 		translateNonStreaming: c.Bool("translateNonStreaming"),
 		indexPage:             indexPageBuf.Bytes(),
 		indexPageCompileTime:  compileTime,
@@ -246,24 +244,6 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
-
-	if s.translateReframe {
-		reframe, err := NewReframeTranslatorHTTPHandler(s.doFind)
-		if err != nil {
-			ec <- err
-			close(ec)
-			return ec
-		}
-		mux.HandleFunc("/reframe", reframe)
-	} else {
-		reframe, err := NewReframeHTTPHandler(s.backends)
-		if err != nil {
-			ec <- err
-			close(ec)
-			return ec
-		}
-		mux.HandleFunc("/reframe", reframe)
-	}
 
 	delegated, err := NewDelegatedTranslator(s.doFind)
 	if err != nil {
