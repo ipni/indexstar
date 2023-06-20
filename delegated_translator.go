@@ -17,6 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -25,6 +26,8 @@ const (
 	unknownProtocol = "unknown"
 	unknownSchema   = unknownProtocol
 )
+
+type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash) (int, []byte)
 
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	finder := delegatedTranslator{backend}
