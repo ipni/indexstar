@@ -54,6 +54,7 @@ func (r resultSet) putIfAbsent(p *encryptedOrPlainResult) bool {
 		v = make([]byte, 0, len(pidb)+len(p.ContextID))
 		v = append(v, pidb...)
 		v = append(v, p.ContextID...)
+		v = append(v, p.Metadata...)
 	}
 	key := crc32.ChecksumIEEE(v)
 	if _, seen := r[key]; seen {
