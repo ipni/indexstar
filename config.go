@@ -12,14 +12,6 @@ import (
 )
 
 const (
-	defaultReframeMaxIdleConns        = 100
-	defaultReframeMaxConnsPerHost     = 100
-	defaultReframeMaxIdleConnsPerHost = 100
-	defaultReframeDialerTimeout       = 10 * time.Second
-	defaultReframeDialerKeepAlive     = 15 * time.Second
-	defaultReframeHttpClientTimeout   = 10 * time.Second
-	defaultReframeResultMaxWait       = 5 * time.Second
-
 	defaultServerMaxIdleConns               = 100
 	defaultServerMaxConnsPerHost            = 100
 	defaultServerMaxIdleConnsPerHost        = 100
@@ -50,15 +42,6 @@ const (
 )
 
 var config struct {
-	Reframe struct {
-		MaxIdleConns        int
-		MaxConnsPerHost     int
-		MaxIdleConnsPerHost int
-		DialerTimeout       time.Duration
-		DialerKeepAlive     time.Duration
-		HttpClientTimeout   time.Duration
-		ResultMaxWait       time.Duration
-	}
 	Server struct {
 		MaxIdleConns        int
 		MaxConnsPerHost     int
@@ -84,14 +67,6 @@ var config struct {
 }
 
 func init() {
-	config.Reframe.MaxIdleConns = getEnvOrDefault[int]("REFRAME_MAX_IDLE_CONNS", defaultReframeMaxIdleConns)
-	config.Reframe.MaxConnsPerHost = getEnvOrDefault[int]("REFRAME_MAX_CONNS_PER_HOST", defaultReframeMaxConnsPerHost)
-	config.Reframe.MaxIdleConnsPerHost = getEnvOrDefault[int]("REFRAME_MAX_IDLE_CONNS_PER_HOST", defaultReframeMaxIdleConnsPerHost)
-	config.Reframe.DialerTimeout = getEnvOrDefault[time.Duration]("REFRAME_DIALER_TIMEOUT", defaultReframeDialerTimeout)
-	config.Reframe.DialerKeepAlive = getEnvOrDefault[time.Duration]("REFRAME_DIALER_KEEP_ALIVE", defaultReframeDialerKeepAlive)
-	config.Reframe.HttpClientTimeout = getEnvOrDefault[time.Duration]("REFRAME_HTTP_CLIENT_TIMEOUT", defaultReframeHttpClientTimeout)
-	config.Reframe.ResultMaxWait = getEnvOrDefault[time.Duration]("REFRAME_RESULT_MAX_WAIT", defaultReframeResultMaxWait)
-
 	config.Server.MaxIdleConns = getEnvOrDefault[int]("SERVER_MAX_IDLE_CONNS", defaultServerMaxIdleConns)
 	config.Server.MaxConnsPerHost = getEnvOrDefault[int]("SERVER_MAX_CONNS_PER_HOST", defaultServerMaxConnsPerHost)
 	config.Server.MaxIdleConnsPerHost = getEnvOrDefault[int]("SERVER_MAX_IDLE_CONNS_PER_HOST", defaultServerMaxIdleConnsPerHost)
@@ -151,7 +126,6 @@ func getEnvOrDefault[T any](key string, def T) T {
 }
 
 var (
-	ErrInitialized    = errors.New("configuration file already exists")
 	ErrNotInitialized = errors.New("not initialized")
 )
 
