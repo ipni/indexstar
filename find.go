@@ -24,7 +24,6 @@ import (
 
 const (
 	findMethodOrig      = "http-v0"
-	findMethodReframe   = "reframe-v1"
 	findMethodDelegated = "delegated-v1"
 )
 
