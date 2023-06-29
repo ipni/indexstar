@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"strings"
 	"text/template"
 	"time"
@@ -38,9 +37,7 @@ type server struct {
 	net.Listener
 	metricsListener       net.Listener
 	cfgBase               string
-	fallbackBackend       string
 	backends              []Backend
-	base                  http.Handler
 	translateNonStreaming bool
 
 	indexPage            []byte
@@ -101,13 +98,6 @@ func NewServer(c *cli.Context) (*server, error) {
 		return dialer.DialContext(ctx, network, addr)
 	}
 
-	fallback := backends[0].URL()
-	for _, b := range backends {
-		if b.URL().Host == c.String("fallbackBackend") {
-			fallback = b.URL()
-		}
-	}
-
 	indexTemplate, err := template.ParseFS(webUI, "index.html")
 	if err != nil {
 		return nil, err
@@ -129,11 +119,9 @@ func NewServer(c *cli.Context) (*server, error) {
 			Transport: t,
 		},
 		cfgBase:               c.String("config"),
-		fallbackBackend:       c.String("fallbackBackend"),
 		Listener:              bound,
 		metricsListener:       mb,
 		backends:              backends,
-		base:                  httputil.NewSingleHostReverseProxy(fallback),
 		translateNonStreaming: c.Bool("translateNonStreaming"),
 		indexPage:             indexPageBuf.Bytes(),
 		indexPageCompileTime:  compileTime,
@@ -222,14 +210,6 @@ func (s *server) Reload(cctx *cli.Context) error {
 	}
 	s.backends = b
 
-	fallback := b[0].URL()
-	for _, be := range b {
-		if be.URL().Host == s.fallbackBackend {
-			fallback = be.URL()
-		}
-	}
-
-	s.base = httputil.NewSingleHostReverseProxy(fallback)
 	return nil
 }
 
@@ -315,22 +295,6 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJsonResponse(w, http.StatusOK, []byte("ready"))
-}
-
-func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// default behavior.
-	fallback := s.backends[0].URL()
-	for _, be := range s.backends {
-		if be.URL().Host == s.fallbackBackend {
-			fallback = be.URL()
-		}
-	}
-
-	r.URL.Host = fallback.Host
-	r.URL.Scheme = fallback.Scheme
-	r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-	r.Header.Set("Host", fallback.Host)
-	s.base.ServeHTTP(w, r)
 }
 
 func writeJsonResponse(w http.ResponseWriter, status int, body []byte) {
