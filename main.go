@@ -53,10 +53,6 @@ func main() {
 				Name:  providersBackendsArg,
 				Usage: "Backends to propagate providers requests to.",
 			},
-			&cli.StringFlag{
-				Name:  "fallbackBackend",
-				Usage: "Fallback Backend is used for requests to the index page",
-			},
 			&cli.BoolFlag{
 				Name:  "translateNonStreaming",
 				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
