@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
-	"sync"
-	"time"
+	"path"
 
-	"github.com/ipni/go-libipni/find/model"
+	//"github.com/ipni/go-libipni/find/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -19,92 +17,13 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	combined := make(chan []model.ProviderInfo)
-	wg := sync.WaitGroup{}
-	var err error
-	_, err = io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		log.Warnw("failed to read original request body", "err", err)
-		return
-	}
-
-	for _, backend := range s.backends {
-		// do not send providers requests to not providers backends
-		if _, ok := backend.(providersBackend); !ok {
-			continue
-		}
-		wg.Add(1)
-		go func(server *url.URL) {
-			defer wg.Done()
-
-			// Copy the URL from original request and override host/schema to point
-			// to the server.
-			endpoint := *r.URL
-			endpoint.Host = server.Host
-			endpoint.Scheme = server.Scheme
-			log := log.With("backend", endpoint.Host)
-
-			// If body in original request existed, make a reader for it.
-			req, err := http.NewRequest(r.Method, endpoint.String(), nil)
-			if err != nil {
-				log.Warnw("failed to construct query", "err", err)
-				return
-			}
-			req.Header.Set("X-Forwarded-Host", r.Host)
-			req.Header.Set("Accept", mediaTypeJson)
-			resp, err := s.Client.Do(req)
-			if err != nil {
-				log.Warnw("failed query", "err", err)
-				return
-			}
-
-			defer resp.Body.Close()
-			log = log.With("status", resp.StatusCode)
-			switch resp.StatusCode {
-			case http.StatusOK:
-				dec := json.NewDecoder(resp.Body)
-				var providers []model.ProviderInfo
-				if err := dec.Decode(&providers); err != nil {
-					log.Warnw("failed backend read", "err", err)
-					return
-				}
-				combined <- providers
-			case http.StatusNotFound, http.StatusNotImplemented:
-				log.Debug("no providers")
-			default:
-				log.Warn("unexpected response while getting providers")
-			}
-		}(backend.URL())
-	}
-	go func() {
-		wg.Wait()
-		close(combined)
-	}()
-
-	resp := make(map[peer.ID]model.ProviderInfo)
-	for prov := range combined {
-		for _, p := range prov {
-			if curr, ok := resp[p.AddrInfo.ID]; ok {
-				clt, e1 := time.Parse(time.RFC3339, curr.LastAdvertisementTime)
-				plt, e2 := time.Parse(time.RFC3339, p.LastAdvertisementTime)
-				if e1 == nil && e2 == nil && clt.Before(plt) {
-					resp[p.AddrInfo.ID] = p
-				}
-				continue
-			}
-			resp[p.AddrInfo.ID] = p
-		}
-	}
+	pinfos := s.pcache.List()
 
 	// Write out combined.
-	// Note that /providers never returns 404. Instead, when there are no providers,
-	// an empty JSON array is returned.
-	out := make([]model.ProviderInfo, 0, len(resp))
-	for _, a := range resp {
-		out = append(out, a)
-	}
-	outData, err := json.Marshal(out)
+	//
+	// Note that /providers never returns 404. Instead, when there are no
+	// providers, an empty JSON array is returned.
+	outData, err := json.Marshal(pinfos)
 	if err != nil {
 		log.Warnw("failed marshal response", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
@@ -115,89 +34,33 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 
 // provider returns most recent state of a single provider.
 func (s *server) provider(w http.ResponseWriter, r *http.Request) {
-	combined := make(chan model.ProviderInfo)
-	wg := sync.WaitGroup{}
-	var err error
-	_, err = io.ReadAll(r.Body)
+	_, err := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	if err != nil {
 		log.Warnw("failed to read original request body", "err", err)
 		return
 	}
 
-	for _, backend := range s.backends {
-		// do not send providers requests to not providers backends
-		if _, ok := backend.(providersBackend); !ok {
-			continue
-		}
-		wg.Add(1)
-		go func(server *url.URL) {
-			defer wg.Done()
-
-			// Copy the URL from original request and override host/schema to point
-			// to the server.
-			endpoint := *r.URL
-			endpoint.Host = server.Host
-			endpoint.Scheme = server.Scheme
-			log := log.With("backend", endpoint.Host)
-
-			req, err := http.NewRequest(r.Method, endpoint.String(), nil)
-			if err != nil {
-				log.Warnw("failed to construct query", "err", err)
-				return
-			}
-			req.Header.Set("X-Forwarded-Host", r.Host)
-			req.Header.Set("Accept", mediaTypeJson)
-			resp, err := s.Client.Do(req)
-			if err != nil {
-				log.Warnw("failed query", "err", err)
-				return
-			}
-			defer resp.Body.Close()
-			log = log.With("status", resp.StatusCode)
-			switch resp.StatusCode {
-			case http.StatusOK:
-				dec := json.NewDecoder(resp.Body)
-				var provider model.ProviderInfo
-				if err = dec.Decode(&provider); err != nil {
-					log.Warnw("failed backend read", "err", err)
-					return
-				}
-				combined <- provider
-			case http.StatusNotFound, http.StatusNotImplemented:
-				log.Debug("no provider")
-			default:
-				log.Warn("unexpected response while getting provider")
-			}
-		}(backend.URL())
-	}
-	go func() {
-		wg.Wait()
-		close(combined)
-	}()
-
-	resp := model.ProviderInfo{}
-	var count int
-	for p := range combined {
-		count++
-		if resp.LastAdvertisementTime != "" {
-			clt, e1 := time.Parse(time.RFC3339, resp.LastAdvertisementTime)
-			plt, e2 := time.Parse(time.RFC3339, p.LastAdvertisementTime)
-			if e1 == nil && e2 == nil && clt.Before(plt) {
-				resp = p
-			}
-			continue
-		}
-		resp = p
+	pid, err := peer.Decode(path.Base(r.URL.Path))
+	if err != nil {
+		log.Warnw("bad provider ID", "err", err)
+		http.Error(w, "", http.StatusBadRequest)
+		return
 	}
 
-	if count == 0 {
+	pinfo, err := s.pcache.Get(r.Context(), pid)
+	if err != nil {
+		log.Warnw("count not get provider information", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	if pinfo == nil {
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
 
-	// Write out combined.
-	outData, err := json.Marshal(resp)
+	outData, err := json.Marshal(pinfo)
 	if err != nil {
 		log.Warnw("failed marshal response", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
