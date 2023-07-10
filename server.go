@@ -12,6 +12,7 @@ import (
 	"time"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/ipni/go-libipni/pcache"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
@@ -42,6 +43,7 @@ type server struct {
 
 	indexPage            []byte
 	indexPageCompileTime time.Time
+	pcache               *pcache.ProviderCache
 }
 
 // caskadeBackend is a marker for caskade backends
@@ -98,6 +100,28 @@ func NewServer(c *cli.Context) (*server, error) {
 		return dialer.DialContext(ctx, network, addr)
 	}
 
+	httpClient := http.Client{
+		Timeout:   config.Server.HttpClientTimeout,
+		Transport: t,
+	}
+
+	var providerSources []pcache.ProviderSource
+	for _, backend := range backends {
+		// do not send providers requests to not providers backends
+		if _, ok := backend.(providersBackend); !ok {
+			continue
+		}
+		httpSrc, err := pcache.NewHTTPSource(backend.URL().String(), &httpClient)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create http provider source: %w", err)
+		}
+		providerSources = append(providerSources, httpSrc)
+	}
+	pc, err := pcache.New(pcache.WithSource(providerSources...))
+	if err != nil {
+		return nil, fmt.Errorf("cannot create provider cache: %w", err)
+	}
+
 	indexTemplate, err := template.ParseFS(webUI, "index.html")
 	if err != nil {
 		return nil, err
@@ -113,11 +137,8 @@ func NewServer(c *cli.Context) (*server, error) {
 	compileTime := time.Now()
 
 	return &server{
-		Context: c.Context,
-		Client: http.Client{
-			Timeout:   config.Server.HttpClientTimeout,
-			Transport: t,
-		},
+		Context:               c.Context,
+		Client:                httpClient,
 		cfgBase:               c.String("config"),
 		Listener:              bound,
 		metricsListener:       mb,
@@ -125,6 +146,7 @@ func NewServer(c *cli.Context) (*server, error) {
 		translateNonStreaming: c.Bool("translateNonStreaming"),
 		indexPage:             indexPageBuf.Bytes(),
 		indexPageCompileTime:  compileTime,
+		pcache:                pc,
 	}, nil
 }
 
