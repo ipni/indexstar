@@ -7,7 +7,7 @@ require (
 	github.com/filecoin-project/index-provider v0.9.1
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/ipni/go-libipni v0.2.10
+	github.com/ipni/go-libipni v0.2.12
 	github.com/libp2p/go-libp2p v0.28.1
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/mitchellh/go-homedir v1.1.0
