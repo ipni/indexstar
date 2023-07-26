@@ -24,8 +24,6 @@ import (
 	"go.opencensus.io/tag"
 )
 
-var newline = []byte("\n")
-
 type (
 	resultSet map[uint32]struct{}
 
@@ -150,8 +148,9 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	}()
 	dmh, err := multihash.Decode(mh)
 	if err != nil {
-		log.Errorw("Failed to decode multihash", "err", err)
-		http.Error(w, "", http.StatusInternalServerError)
+		msg := "Cannot decode multihash"
+		log.Errorw(msg, "err", err)
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	var maxWait time.Duration
@@ -338,10 +337,6 @@ LOOP:
 			} else {
 				if err := encoder.Encode(result); err != nil {
 					log.Errorw("failed to encode streaming result", "result", result, "err", err)
-					continue
-				}
-				if _, err := w.Write(newline); err != nil {
-					log.Errorw("failed to write newline while streaming results", "result", result, "err", err)
 					continue
 				}
 				// TODO: optimise the number of time we call flush based on some time-based or result
