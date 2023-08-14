@@ -1,6 +1,6 @@
 module github.com/ipni/indexstar
 
-go 1.19
+go 1.20
 
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
