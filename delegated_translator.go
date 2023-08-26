@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	peerSchema      = "peer"
 	unknownProtocol = "unknown"
 	unknownSchema   = unknownProtocol
 )
@@ -157,10 +158,9 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		err := md.UnmarshalBinary(p.Metadata)
 		if err != nil {
 			appendIfUnique(&drProvider{
-				Protocol: unknownProtocol,
-				Schema:   unknownSchema,
-				ID:       p.Provider.ID,
-				Addrs:    p.Provider.Addrs,
+				Schema: peerSchema,
+				ID:     p.Provider.ID,
+				Addrs:  p.Provider.Addrs,
 			})
 		} else {
 			for _, proto := range md.Protocols() {
