@@ -27,7 +27,7 @@ const (
 	findMethodDelegated = "delegated-v1"
 )
 
-func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
+func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	switch r.Method {
 	case http.MethodOptions:
 		discardBody(r)
@@ -39,41 +39,39 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
 			discardBody(r)
 			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
 		}
-		s.find(w, r, c.Hash())
+		s.find(w, r, c.Hash(), encrypted)
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
 	}
 }
 
-func (s *server) findMultihash(w http.ResponseWriter, r *http.Request) {
+func (s *server) findMultihash(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	switch r.Method {
 	case http.MethodOptions:
 		discardBody(r)
 		handleIPNIOptions(w, true)
 	case http.MethodPost:
-		s.find(w, r, nil)
+		s.find(w, r, nil, encrypted)
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
 	}
 }
 
-func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
+func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	switch r.Method {
 	case http.MethodOptions:
 		discardBody(r)
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
-
-		smh := strings.TrimPrefix(path.Base(r.URL.Path), "multihash/")
+		smh := path.Base(r.URL.Path)
 		mh, err := multihash.FromB58String(smh)
 		if err != nil {
 			discardBody(r)
 			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
 		}
-
-		s.find(w, r, mh)
+		s.find(w, r, mh, encrypted)
 	default:
 		discardBody(r)
 		http.Error(w, "", http.StatusNotFound)
@@ -167,7 +165,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "", http.StatusNotFound)
 }
 
-func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash) {
+func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash, encrypted bool) {
 	acc, err := getAccepts(r)
 	if err != nil {
 		discardBody(r)
@@ -193,7 +191,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 			http.Error(w, "", http.StatusBadRequest)
 			return
 		}
-		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb, mh)
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb, mh, encrypted)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -211,15 +209,15 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	// JSON unless only unsupported media types are specified.
 	switch {
 	case acc.ndjson:
-		s.doFindNDJson(ctx, w, findMethodOrig, r.URL, false, mh)
+		s.doFindNDJson(ctx, w, findMethodOrig, r.URL, false, mh, encrypted)
 	case acc.json || acc.any || !acc.acceptHeaderFound:
 		if s.translateNonStreaming {
-			s.doFindNDJson(ctx, w, findMethodOrig, r.URL, true, mh)
+			s.doFindNDJson(ctx, w, findMethodOrig, r.URL, true, mh, encrypted)
 			return
 		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
-		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb, mh)
+		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb, mh, encrypted)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -231,7 +229,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash, encrypted bool) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -243,12 +241,6 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 			stats.WithTags(loadTags...),
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
-
-	dmh, err := multihash.Decode(mh)
-	if err != nil {
-		log.Warnw("failed to decode multihash", "err", err)
-		return http.StatusInternalServerError, nil
-	}
 
 	// sgResponse is a struct that exists to capture the backend that the response has been received from
 	type sgResponse struct {
@@ -269,9 +261,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
 		_, isProvidersBackend := b.(providersBackend)
-		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
-			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) ||
-			isProvidersBackend {
+		if (encrypted != isDhBackend) || isProvidersBackend {
 			return nil, nil
 		}
 

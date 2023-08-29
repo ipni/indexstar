@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 
 	"github.com/filecoin-project/index-provider/metadata"
@@ -27,13 +26,15 @@ const (
 	unknownSchema   = unknownProtocol
 )
 
-type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash) (int, []byte)
+type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash, encrypted bool) (int, []byte)
 
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	finder := delegatedTranslator{backend}
 	m := http.NewServeMux()
 	m.HandleFunc("/providers", finder.provide)
-	m.HandleFunc("/providers/", finder.find)
+	m.HandleFunc("/encrypted/providers", finder.provide)
+	m.HandleFunc("/providers/", func(w http.ResponseWriter, r *http.Request) { finder.find(w, r, false) })
+	m.HandleFunc("/encrypted/providers/", func(w http.ResponseWriter, r *http.Request) { finder.find(w, r, true) })
 	return m, nil
 }
 
@@ -60,7 +61,7 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
+func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	_ = stats.RecordWithOptions(context.Background(),
 		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
 		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
@@ -88,17 +89,11 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
-	cidUrlParam := strings.TrimPrefix(r.URL.Path, "/providers/")
-	// TODO: replace with URL.JoinPath once upgraded to go 1.19
-	findByCid := path.Join("/cid", cidUrlParam)
-	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	uri, err := url.ParseRequestURI(findByCid)
-	if err != nil {
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+	var cidUrlParam string
+	if encrypted {
+		cidUrlParam = strings.TrimPrefix(r.URL.Path, "/encrypted/providers/")
+	} else {
+		cidUrlParam = strings.TrimPrefix(r.URL.Path, "/providers/")
 	}
 
 	c, err := cid.Decode(cidUrlParam)
@@ -107,8 +102,8 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, c.Hash())
-
+	uri := r.URL.JoinPath("../cid", cidUrlParam)
+	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, c.Hash(), encrypted)
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
 		return
