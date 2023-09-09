@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/ipni/go-libipni/find/model"
+	"github.com/ipni/go-libipni/metadata"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multicodec"
@@ -134,7 +134,7 @@ func (rs *resultStats) reportMetrics(method string) {
 	}
 }
 
-func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash) {
+func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash, encrypted bool) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -146,13 +146,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 			stats.WithTags(loadTags...),
 			stats.WithMeasurements(metrics.FindLoad.M(1)))
 	}()
-	dmh, err := multihash.Decode(mh)
-	if err != nil {
-		msg := "Cannot decode multihash"
-		log.Errorw(msg, "err", err)
-		http.Error(w, msg, http.StatusBadRequest)
-		return
-	}
+
 	var maxWait time.Duration
 	if translateNonStreaming {
 		maxWait = config.Server.ResultMaxWait
@@ -179,9 +173,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
 		_, isProvidersBackend := b.(providersBackend)
-		if (dmh.Code == multihash.DBL_SHA2_256 && !isDhBackend) ||
-			(dmh.Code != multihash.DBL_SHA2_256 && isDhBackend) ||
-			isProvidersBackend {
+		if (encrypted != isDhBackend) || isProvidersBackend {
 			return nil, nil
 		}
 

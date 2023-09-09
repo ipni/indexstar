@@ -236,17 +236,19 @@ func (s *server) Reload(cctx *cli.Context) error {
 }
 
 func (s *server) Serve() chan error {
-	ec := make(chan error)
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/cid/", s.findCid)
-	mux.HandleFunc("/multihash", s.findMultihash)
-	mux.HandleFunc("/multihash/", s.findMultihashSubtree)
+	mux.HandleFunc("/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, false) })
+	mux.HandleFunc("/encrypted/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, true) })
+	mux.HandleFunc("/multihash", func(w http.ResponseWriter, r *http.Request) { s.findMultihash(w, r, false) })
+	mux.HandleFunc("/encrypted/multihash", func(w http.ResponseWriter, r *http.Request) { s.findMultihash(w, r, true) })
+	mux.HandleFunc("/multihash/", func(w http.ResponseWriter, r *http.Request) { s.findMultihashSubtree(w, r, false) })
+	mux.HandleFunc("/encrypted/multihash/", func(w http.ResponseWriter, r *http.Request) { s.findMultihashSubtree(w, r, true) })
 	mux.HandleFunc("/metadata/", s.findMetadataSubtree)
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
 
+	ec := make(chan error)
 	delegated, err := NewDelegatedTranslator(s.doFind)
 	if err != nil {
 		ec <- err
