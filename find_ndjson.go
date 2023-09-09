@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/ipni/go-libipni/find/model"
+	"github.com/ipni/go-libipni/metadata"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multicodec"

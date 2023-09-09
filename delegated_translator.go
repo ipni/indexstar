@@ -7,11 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
+	"path"
 
-	"github.com/filecoin-project/index-provider/metadata"
 	"github.com/ipfs/go-cid"
 	"github.com/ipni/go-libipni/find/model"
+	"github.com/ipni/go-libipni/metadata"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -88,20 +88,15 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		return
 	}
 
-	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
-	var cidUrlParam string
-	if encrypted {
-		cidUrlParam = strings.TrimPrefix(r.URL.Path, "/encrypted/providers/")
-	} else {
-		cidUrlParam = strings.TrimPrefix(r.URL.Path, "/providers/")
-	}
-
+	// Get the CID resource from the last element in the URL path.
+	cidUrlParam := path.Base(r.URL.Path)
 	c, err := cid.Decode(cidUrlParam)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
+	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
 	uri := r.URL.JoinPath("../cid", cidUrlParam)
 	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, c.Hash(), encrypted)
 	if rcode != http.StatusOK {
