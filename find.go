@@ -27,7 +27,7 @@ const (
 	findMethodDelegated = "delegated-v1"
 )
 
-func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool) {
+func (s *server) findCid(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodOptions:
 		handleIPNIOptions(w, false)
@@ -37,7 +37,7 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool)
 		if err != nil {
 			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
 		}
-		s.find(w, r, c.Hash(), encrypted)
+		s.find(w, r, c.Hash())
 	default:
 		w.Header().Set("Allow", http.MethodGet)
 		w.Header().Add("Allow", http.MethodOptions)
@@ -45,7 +45,7 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool)
 	}
 }
 
-func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, encrypted bool) {
+func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodOptions:
 		handleIPNIOptions(w, false)
@@ -55,7 +55,7 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, en
 		if err != nil {
 			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
 		}
-		s.find(w, r, mh, encrypted)
+		s.find(w, r, mh)
 	default:
 		w.Header().Set("Allow", http.MethodGet)
 		w.Header().Add("Allow", http.MethodOptions)
@@ -151,7 +151,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "", http.StatusNotFound)
 }
 
-func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash, encrypted bool) {
+func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash) {
 	acc, err := getAccepts(r)
 	if err != nil {
 		http.Error(w, "invalid Accept header", http.StatusBadRequest)
@@ -211,10 +211,8 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*sgResponse, error) {
-		// forward double hashed requests to double hashed backends only and regular requests to regular backends
-		_, isDhBackend := b.(dhBackend)
-		_, isProvidersBackend := b.(providersBackend)
-		if (encrypted != isDhBackend) || isProvidersBackend {
+		// Forward double hashed requests to backends.
+		if _, isProvidersBackend := b.(providersBackend); isProvidersBackend {
 			return nil, nil
 		}
 

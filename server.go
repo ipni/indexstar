@@ -28,7 +28,6 @@ var (
 const (
 	backendsArg          = "backends"
 	cascadeBackendsArg   = "cascadeBackends"
-	dhBackendsArg        = "dhBackends"
 	providersBackendsArg = "providersBackends"
 )
 
@@ -51,10 +50,6 @@ type caskadeBackend struct {
 	Backend
 }
 
-type dhBackend struct {
-	Backend
-}
-
 type providersBackend struct {
 	Backend
 }
@@ -70,7 +65,6 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 	servers := c.StringSlice(backendsArg)
 	cascadeServers := c.StringSlice(cascadeBackendsArg)
-	dhServers := c.StringSlice(dhBackendsArg)
 	providersServers := c.StringSlice(providersBackendsArg)
 
 	if len(servers) == 0 {
@@ -83,7 +77,7 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 	}
 
-	backends, err := loadBackends(servers, cascadeServers, dhServers, providersServers)
+	backends, err := loadBackends(servers, cascadeServers, providersServers)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +144,7 @@ func NewServer(c *cli.Context) (*server, error) {
 	}, nil
 }
 
-func loadBackends(servers, cascadeServers, dhServers, providersServers []string) ([]Backend, error) {
+func loadBackends(servers, cascadeServers, providersServers []string) ([]Backend, error) {
 	newBackendFunc := func(s string) (Backend, error) {
 		return NewBackend(s, circuitbreaker.New(
 			circuitbreaker.WithFailOnContextCancel(false),
@@ -169,13 +163,6 @@ func loadBackends(servers, cascadeServers, dhServers, providersServers []string)
 			return nil, fmt.Errorf("failed to instantiate backend: %w", err)
 		}
 		backends = append(backends, b)
-	}
-	for _, s := range dhServers {
-		b, err := newBackendFunc(s)
-		if err != nil {
-			return nil, fmt.Errorf("failed to instantiate dh backend: %w", err)
-		}
-		backends = append(backends, dhBackend{Backend: b})
 	}
 	for _, s := range providersServers {
 		b, err := newBackendFunc(s)
@@ -224,7 +211,6 @@ func (s *server) Reload(cctx *cli.Context) error {
 	}
 	b, err := loadBackends(surls,
 		cctx.StringSlice(cascadeBackendsArg),
-		cctx.StringSlice(dhBackendsArg),
 		cctx.StringSlice(providersBackendsArg))
 	if err != nil {
 		return err

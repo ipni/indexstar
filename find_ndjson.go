@@ -134,7 +134,7 @@ func (rs *resultStats) reportMetrics(method string) {
 	}
 }
 
-func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash, encrypted bool) {
+func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -170,10 +170,8 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	resultsChan := make(chan *resultWithBackend, 1)
 	var count int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
-		// forward double hashed requests to double hashed backends only and regular requests to regular backends
-		_, isDhBackend := b.(dhBackend)
-		_, isProvidersBackend := b.(providersBackend)
-		if (encrypted != isDhBackend) || isProvidersBackend {
+		// Do not forward requests to providers backends.
+		if _, isProvidersBackend := b.(providersBackend); isProvidersBackend {
 			return nil, nil
 		}
 

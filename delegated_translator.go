@@ -30,8 +30,8 @@ func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	m := http.NewServeMux()
 	m.HandleFunc("/providers", finder.provide)
 	m.HandleFunc("/encrypted/providers", finder.provide)
-	m.HandleFunc("/providers/", func(w http.ResponseWriter, r *http.Request) { finder.find(w, r, false) })
-	m.HandleFunc("/encrypted/providers/", func(w http.ResponseWriter, r *http.Request) { finder.find(w, r, true) })
+	m.HandleFunc("/providers/", finder.find)
+	m.HandleFunc("/encrypted/providers/", finder.find)
 	return m, nil
 }
 
@@ -57,7 +57,7 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encrypted bool) {
+func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request) {
 	_ = stats.RecordWithOptions(context.Background(),
 		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
 		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
