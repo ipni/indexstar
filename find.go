@@ -30,65 +30,48 @@ const (
 func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	switch r.Method {
 	case http.MethodOptions:
-		discardBody(r)
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
 		sc := strings.TrimPrefix(path.Base(r.URL.Path), "cid/")
 		c, err := cid.Decode(sc)
 		if err != nil {
-			discardBody(r)
 			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
 		}
 		s.find(w, r, c.Hash(), encrypted)
 	default:
-		discardBody(r)
-		http.Error(w, "", http.StatusNotFound)
-	}
-}
-
-func (s *server) findMultihash(w http.ResponseWriter, r *http.Request, encrypted bool) {
-	switch r.Method {
-	case http.MethodOptions:
-		discardBody(r)
-		handleIPNIOptions(w, true)
-	case http.MethodPost:
-		s.find(w, r, nil, encrypted)
-	default:
-		discardBody(r)
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
 }
 
 func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, encrypted bool) {
 	switch r.Method {
 	case http.MethodOptions:
-		discardBody(r)
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
 		smh := path.Base(r.URL.Path)
 		mh, err := multihash.FromB58String(smh)
 		if err != nil {
-			discardBody(r)
 			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
 		}
 		s.find(w, r, mh, encrypted)
 	default:
-		discardBody(r)
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
 }
 
 func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
-	discardBody(r)
 	if r.Method != http.MethodGet {
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	method := r.Method
-	req := r.URL
+	reqURL := r.URL
 
 	sg := &scatterGather[Backend, []byte]{
 		backends: s.backends,
@@ -96,7 +79,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: wait for the first successful response instead
-	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
+	err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
 		// send metadata requests only to dh backends
 		if _, isDhBackend := b.(dhBackend); !isDhBackend {
 			return nil, nil
@@ -104,7 +87,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
-		endpoint := *req
+		endpoint := *reqURL
 		endpoint.Host = b.URL().Host
 		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
@@ -146,7 +129,8 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil, err
 		}
-	}); err != nil {
+	})
+	if err != nil {
 		log.Errorw("Failed to scatter HTTP find metadata request", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -168,56 +152,23 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash, encrypted bool) {
 	acc, err := getAccepts(r)
 	if err != nil {
-		discardBody(r)
 		http.Error(w, "invalid Accept header", http.StatusBadRequest)
 		return
 	}
-	var rb []byte
-	switch r.Method {
-	case http.MethodGet:
-		discardBody(r)
-	case http.MethodPost:
-		if !acc.json && !acc.any && acc.acceptHeaderFound {
-			// Only non-streaming JSON is supported for POST requests.
-			http.Error(w, "unsupported media type", http.StatusBadRequest)
-			return
-		}
-		// Copy the original request body in case it is a POST batch find request.
-		var err error
-		rb, err = io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		if err != nil {
-			log.Warnw("Failed to read original request body", "err", err)
-			http.Error(w, "", http.StatusBadRequest)
-			return
-		}
-		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, rb, mh, encrypted)
-		if rcode != http.StatusOK {
-			http.Error(w, "", rcode)
-			return
-		}
-		writeJsonResponse(w, http.StatusOK, resp)
-		return
-	default:
-		discardBody(r)
-		http.Error(w, "", http.StatusNotFound)
-		return
-	}
-	ctx := r.Context()
 
 	// Use NDJSON response only when the request explicitly accepts it. Otherwise, fallback on
 	// JSON unless only unsupported media types are specified.
 	switch {
 	case acc.ndjson:
-		s.doFindNDJson(ctx, w, findMethodOrig, r.URL, false, mh, encrypted)
+		s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, false, mh, encrypted)
 	case acc.json || acc.any || !acc.acceptHeaderFound:
 		if s.translateNonStreaming {
-			s.doFindNDJson(ctx, w, findMethodOrig, r.URL, true, mh, encrypted)
+			s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, true, mh, encrypted)
 			return
 		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
-		rcode, resp := s.doFind(ctx, r.Method, findMethodOrig, r.URL, rb, mh, encrypted)
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, nil, encrypted)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -229,7 +180,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash, encrypted bool) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, encrypted bool) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -272,7 +223,10 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
 
-		bodyReader := bytes.NewReader(body)
+		var bodyReader *bytes.Reader
+		if len(body) != 0 {
+			bodyReader = bytes.NewReader(body)
+		}
 		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), bodyReader)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
@@ -425,9 +379,4 @@ func handleIPNIOptions(w http.ResponseWriter, post bool) {
 		w.Header().Add("X-IPNI-Allow-Cascade", config.Server.CascadeLabels)
 	}
 	w.WriteHeader(http.StatusAccepted)
-}
-
-func discardBody(r *http.Request) {
-	_, _ = io.Copy(io.Discard, r.Body)
-	_ = r.Body.Close()
 }
