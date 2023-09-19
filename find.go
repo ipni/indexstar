@@ -82,8 +82,8 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: wait for the first successful response instead
 	err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*[]byte, error) {
-		// send metadata requests only to dh backends
-		if _, isDhBackend := b.(dhBackend); !isDhBackend {
+		// Do not send metadata to providers backends.
+		if _, isProvidersBackend := b.(providersBackend); isProvidersBackend {
 			return nil, nil
 		}
 
@@ -162,15 +162,15 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	// JSON unless only unsupported media types are specified.
 	switch {
 	case acc.ndjson:
-		s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, false, mh, encrypted)
+		s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, false, mh)
 	case acc.json || acc.any || !acc.acceptHeaderFound:
 		if s.translateNonStreaming {
-			s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, true, mh, encrypted)
+			s.doFindNDJson(r.Context(), w, findMethodOrig, r.URL, true, mh)
 			return
 		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
-		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, encrypted)
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -182,7 +182,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
