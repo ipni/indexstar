@@ -151,7 +151,6 @@ func NewServer(c *cli.Context) (*server, error) {
 }
 
 func loadBackends(servers, cascadeServers, dhServers, providersServers []string) ([]Backend, error) {
-
 	newBackendFunc := func(s string) (Backend, error) {
 		return NewBackend(s, circuitbreaker.New(
 			circuitbreaker.WithFailOnContextCancel(false),
@@ -239,8 +238,6 @@ func (s *server) Serve() chan error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, false) })
 	mux.HandleFunc("/encrypted/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, true) })
-	mux.HandleFunc("/multihash", func(w http.ResponseWriter, r *http.Request) { s.findMultihash(w, r, false) })
-	mux.HandleFunc("/encrypted/multihash", func(w http.ResponseWriter, r *http.Request) { s.findMultihash(w, r, true) })
 	mux.HandleFunc("/multihash/", func(w http.ResponseWriter, r *http.Request) { s.findMultihashSubtree(w, r, false) })
 	mux.HandleFunc("/encrypted/multihash/", func(w http.ResponseWriter, r *http.Request) { s.findMultihashSubtree(w, r, true) })
 	mux.HandleFunc("/metadata/", s.findMetadataSubtree)
@@ -313,9 +310,9 @@ func (s *server) Serve() chan error {
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
-	discardBody(r)
 	if r.Method != http.MethodGet {
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
 	writeJsonResponse(w, http.StatusOK, []byte("ready"))

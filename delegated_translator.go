@@ -4,19 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"hash/crc32"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
 
-	"github.com/ipfs/go-cid"
 	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/go-libipni/metadata"
 	"github.com/ipni/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
@@ -26,7 +23,7 @@ const (
 	unknownSchema   = unknownProtocol
 )
 
-type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, mh multihash.Multihash, encrypted bool) (int, []byte)
+type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, encrypted bool) (int, []byte)
 
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	finder := delegatedTranslator{backend}
@@ -47,7 +44,6 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
 		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
 
-	discardBody(r)
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
 	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
@@ -66,39 +62,26 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
 		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
 
-	// read out / close the request body.
-	_, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		log.Warnw("failed to read original request body", "err", err)
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
 	h.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
 	switch r.Method {
+	case http.MethodGet:
 	case http.MethodOptions:
 		w.WriteHeader(http.StatusOK)
 		return
-	case http.MethodGet:
 	default:
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Get the CID resource from the last element in the URL path.
 	cidUrlParam := path.Base(r.URL.Path)
-	c, err := cid.Decode(cidUrlParam)
-	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
 
 	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
 	uri := r.URL.JoinPath("../cid", cidUrlParam)
-	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, c.Hash(), encrypted)
+	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, encrypted)
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
 		return
@@ -117,7 +100,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		// serverr
 		log.Warnw("failed to parse backend response", "number_multihash", len(parsed.MultihashResults))
 		http.Error(w, "", http.StatusInternalServerError)
-
+		return
 	}
 
 	res := parsed.MultihashResults[0]

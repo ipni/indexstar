@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"path"
 
@@ -12,8 +11,8 @@ import (
 
 func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		discardBody(r)
-		http.Error(w, "", http.StatusNotFound)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -34,13 +33,6 @@ func (s *server) providers(w http.ResponseWriter, r *http.Request) {
 
 // provider returns most recent state of a single provider.
 func (s *server) provider(w http.ResponseWriter, r *http.Request) {
-	_, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		log.Warnw("failed to read original request body", "err", err)
-		return
-	}
-
 	pid, err := peer.Decode(path.Base(r.URL.Path))
 	if err != nil {
 		log.Warnw("bad provider ID", "err", err)
