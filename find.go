@@ -170,7 +170,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 		}
 		// In a case where the request has no `Accept` header at all, be forgiving and respond with
 		// JSON.
-		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, nil, encrypted)
+		rcode, resp := s.doFind(r.Context(), r.Method, findMethodOrig, r.URL, encrypted)
 		if rcode != http.StatusOK {
 			http.Error(w, "", rcode)
 			return
@@ -182,7 +182,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, body []byte, encrypted bool) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -225,11 +225,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
 
-		var bodyReader *bytes.Reader
-		if len(body) != 0 {
-			bodyReader = bytes.NewReader(body)
-		}
-		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), bodyReader)
+		req, err := http.NewRequestWithContext(cctx, method, endpoint.String(), nil)
 		if err != nil {
 			log.Warnw("Failed to construct backend query", "err", err)
 			return nil, err
