@@ -40,6 +40,7 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool)
 		s.find(w, r, c.Hash(), encrypted)
 	default:
 		w.Header().Set("Allow", http.MethodGet)
+		w.Header().Add("Allow", http.MethodOptions)
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
 }
@@ -57,6 +58,7 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, en
 		s.find(w, r, mh, encrypted)
 	default:
 		w.Header().Set("Allow", http.MethodGet)
+		w.Header().Add("Allow", http.MethodOptions)
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
 }
