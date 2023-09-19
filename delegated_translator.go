@@ -23,7 +23,7 @@ const (
 	unknownSchema   = unknownProtocol
 )
 
-type findFunc func(ctx context.Context, method, source string, req *url.URL, body []byte, encrypted bool) (int, []byte)
+type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
 
 func NewDelegatedTranslator(backend findFunc) (http.Handler, error) {
 	finder := delegatedTranslator{backend}
@@ -81,7 +81,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 
 	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
 	uri := r.URL.JoinPath("../cid", cidUrlParam)
-	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, []byte{}, encrypted)
+	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, encrypted)
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
 		return
