@@ -134,7 +134,7 @@ func (rs *resultStats) reportMetrics(method string) {
 	}
 }
 
-func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, req *url.URL, translateNonStreaming bool, mh multihash.Multihash, encrypted bool) {
+func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source string, reqURL *url.URL, translateNonStreaming bool, mh multihash.Multihash, encrypted bool) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -179,7 +179,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
-		endpoint := *req
+		endpoint := *reqURL
 		endpoint.Host = b.URL().Host
 		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)

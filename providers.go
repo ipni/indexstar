@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"path"
 
-	//"github.com/ipni/go-libipni/find/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
