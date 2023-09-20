@@ -267,7 +267,6 @@ func (s *server) Serve() chan error {
 			}
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		default:
-			log.Infow("X404 url path not found", "path", r.URL.Path)
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		}
 	})

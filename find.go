@@ -138,16 +138,19 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for md := range sg.gather(ctx) {
-		// It's ok to return the first encountered metadata. This is because metadata is uniquely identified
-		// by ValueKey (peerID + contextID). I.e. it's not possible to have different metadata records for the same ValueKey.
-		// In comparison to regular find requests where it's perfectly normal to have different results returned by different IPNI
-		// instances and hence they need to be aggregated.
+		// It is ok to return the first encountered metadata. This is because
+		// metadata is uniquely identified by ValueKey (peerID + contextID).
+		// I.e. it is not possible to have different metadata records for the
+		// same ValueKey.
+		//
+		// Whereas in regular find requests it is perfectly normal to have
+		// different results returned by different IPNI instances and hence
+		// they need to be aggregated.
 		if len(md) > 0 {
 			writeJsonResponse(w, http.StatusOK, md)
 			return
 		}
 	}
-	log.Infow("X404 no metadata results found by sg", "url", reqURL.String())
 	http.Error(w, "", http.StatusNotFound)
 }
 
@@ -333,7 +336,6 @@ outer:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
-		log.Infow("X404 no multihash results found by sg", "url", reqURL.String())
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		return http.StatusNotFound, nil
 	}

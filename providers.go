@@ -47,7 +47,6 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pinfo == nil {
-		log.Infow("X404 provider not found", "id", pid)
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}

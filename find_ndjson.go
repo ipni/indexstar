@@ -343,7 +343,6 @@ LOOP:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if len(results) == 0 {
-		log.Infow("X404 results not found for nd-json", "url", reqURL.String())
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		http.Error(w, "", http.StatusNotFound)
 		return
