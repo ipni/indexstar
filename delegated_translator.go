@@ -82,7 +82,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	cidUrlParam := path.Base(r.URL.Path)
 
 	// Translate URL by mapping `/providers/{CID}` to `/cid/{CID}`.
-	uri := r.URL.JoinPath("../cid", cidUrlParam)
+	uri := r.URL.JoinPath("../../cid", cidUrlParam)
 	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, encrypted)
 	if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
