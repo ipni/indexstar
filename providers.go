@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"path"
 
-	//"github.com/ipni/go-libipni/find/model"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -48,6 +47,7 @@ func (s *server) provider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pinfo == nil {
+		log.Infow("X404 provider not found", "id", pid)
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}

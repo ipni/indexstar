@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -32,7 +31,7 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool)
 	case http.MethodOptions:
 		handleIPNIOptions(w, false)
 	case http.MethodGet:
-		sc := strings.TrimPrefix(path.Base(r.URL.Path), "cid/")
+		sc := path.Base(r.URL.Path)
 		c, err := cid.Decode(sc)
 		if err != nil {
 			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
@@ -148,6 +147,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	log.Infow("X404 no metadata results found by sg", "url", reqURL.String())
 	http.Error(w, "", http.StatusNotFound)
 }
 
@@ -182,7 +182,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	}
 }
 
-func (s *server) doFind(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte) {
+func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.URL, encrypted bool) (int, []byte) {
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
@@ -220,7 +220,7 @@ func (s *server) doFind(ctx context.Context, method, source string, req *url.URL
 
 		// Copy the URL from original request and override host/schema to point
 		// to the server.
-		endpoint := *req
+		endpoint := *reqURL
 		endpoint.Host = b.URL().Host
 		endpoint.Scheme = b.URL().Scheme
 		log := log.With("backend", endpoint.Host)
@@ -299,7 +299,7 @@ outer:
 			} else {
 				if !bytes.Equal(resp.MultihashResults[0].Multihash, r.rsp.MultihashResults[0].Multihash) {
 					// weird / invalid.
-					log.Warnw("conflicting results", "q", req, "first", resp.MultihashResults[0].Multihash, "second", r.rsp.MultihashResults[0].Multihash)
+					log.Warnw("conflicting results", "q", reqURL, "first", resp.MultihashResults[0].Multihash, "second", r.rsp.MultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
 				for _, pr := range r.rsp.MultihashResults[0].ProviderResults {
@@ -320,7 +320,7 @@ outer:
 				updateFoundFlags(r.bknd)
 			} else {
 				if !bytes.Equal(resp.EncryptedMultihashResults[0].Multihash, r.rsp.EncryptedMultihashResults[0].Multihash) {
-					log.Warnw("conflicting encrypted results", "q", req, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.rsp.EncryptedMultihashResults[0].Multihash)
+					log.Warnw("conflicting encrypted results", "q", reqURL, "first", resp.EncryptedMultihashResults[0].Multihash, "second", r.rsp.EncryptedMultihashResults[0].Multihash)
 					return http.StatusInternalServerError, nil
 				}
 				updateFoundFlags(r.bknd)
@@ -333,20 +333,21 @@ outer:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
+		log.Infow("X404 no multihash results found by sg", "url", reqURL.String())
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		return http.StatusNotFound, nil
-	} else {
-		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
-		yesno := func(yn bool) string {
-			if yn {
-				return "yes"
-			}
-			return "no"
-		}
-
-		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
-		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 	}
+
+	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
+	yesno := func(yn bool) string {
+		if yn {
+			return "yes"
+		}
+		return "no"
+	}
+
+	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
+	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 
 	rs.observeFindResponse(&resp)
 	rs.reportMetrics(source)

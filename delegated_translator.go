@@ -46,14 +46,16 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
-	h.Add("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	h.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
 	switch r.Method {
 	case http.MethodOptions:
 		w.WriteHeader(http.StatusOK)
 	case http.MethodPut:
 		http.Error(w, "", http.StatusNotImplemented)
 	default:
-		http.Error(w, "", http.StatusNotFound)
+		h.Add("Allow", http.MethodGet)
+		h.Add("Allow", http.MethodOptions)
+		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
 }
 
