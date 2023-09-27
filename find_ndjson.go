@@ -198,7 +198,11 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 		resp, err := s.Client.Do(req)
 		if err != nil {
-			log.Warnw("Failed to query backend", "err", err)
+			if errors.Is(err, context.Canceled) {
+				log.Debug("Backend query canceled")
+			} else {
+				log.Warnw("Failed to query backend", "err", err)
+			}
 			return nil, err
 		}
 		defer resp.Body.Close()
@@ -251,7 +255,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 				}
 				if err := scanner.Err(); err != nil {
 					if errors.Is(err, context.Canceled) {
-						log.Info("Failed to read backend response because of cancelled context")
+						log.Debug("Reading backend response cancelled")
 					} else {
 						log.Warnw("Failed to read backend response", "err", err)
 					}
