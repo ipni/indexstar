@@ -255,7 +255,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 				}
 				if err := scanner.Err(); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						log.Debug("Reading backend response ended", "err", err)
+						log.Debugw("Reading backend response ended", "err", err)
 					} else {
 						log.Warnw("Failed to read backend response", "err", err)
 					}
