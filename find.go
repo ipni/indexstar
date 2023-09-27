@@ -242,8 +242,8 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 
 		resp, err := s.Client.Do(req)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				log.Debug("Backend query canceled")
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				log.Debug("Backend query ended", "err", err)
 			} else {
 				log.Warnw("Failed to query backend", "err", err)
 			}
@@ -253,8 +253,8 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 		data, err := io.ReadAll(resp.Body)
 
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				log.Debug("Reading backend response cancelled")
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				log.Debug("Reading backend response ended", "err", err)
 			} else {
 				log.Warnw("Failed to read backend response", "err", err)
 			}
