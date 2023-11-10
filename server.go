@@ -162,7 +162,7 @@ func loadBackends(servers, cascadeServers, dhServers, providersServers []string)
 			})), Matchers.Any)
 	}
 
-	var backends []Backend
+	backends := make([]Backend, 0, len(servers)+len(dhServers)+len(providersServers)+len(cascadeServers))
 	for _, s := range servers {
 		b, err := newBackendFunc(s)
 		if err != nil {
@@ -320,7 +320,9 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 
 func writeJsonResponse(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	if _, err := w.Write(body); err != nil {
 		log.Errorw("cannot write response", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
