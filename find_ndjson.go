@@ -210,6 +210,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		switch resp.StatusCode {
 		case http.StatusOK:
 		case http.StatusNotFound:
+			io.Copy(io.Discard, resp.Body)
 			atomic.AddInt32(&count, 1)
 			return nil, nil
 		default:
