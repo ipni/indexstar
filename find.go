@@ -35,12 +35,14 @@ func (s *server) findCid(w http.ResponseWriter, r *http.Request, encrypted bool)
 		c, err := cid.Decode(sc)
 		if err != nil {
 			http.Error(w, "invalid cid: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 		s.find(w, r, c.Hash(), encrypted)
 	default:
 		w.Header().Set("Allow", http.MethodGet)
 		w.Header().Add("Allow", http.MethodOptions)
 		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
 	}
 }
 
@@ -53,12 +55,14 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, en
 		mh, err := multihash.FromB58String(smh)
 		if err != nil {
 			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 		s.find(w, r, mh, encrypted)
 	default:
 		w.Header().Set("Allow", http.MethodGet)
 		w.Header().Add("Allow", http.MethodOptions)
 		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
 	}
 }
 
@@ -155,6 +159,16 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multihash, encrypted bool) {
+	decoded, err := multihash.Decode(mh)
+	if err != nil {
+		http.Error(w, "bad multihash: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(decoded.Digest) == 0 {
+		http.Error(w, "bad multihash: zero-length digest", http.StatusBadRequest)
+		return
+	}
+
 	acc, err := getAccepts(r)
 	if err != nil {
 		http.Error(w, "invalid Accept header", http.StatusBadRequest)
@@ -182,6 +196,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 	default:
 		// The request must have  specified an explicit media type that we do not support.
 		http.Error(w, "unsupported media type", http.StatusBadRequest)
+		return
 	}
 }
 
