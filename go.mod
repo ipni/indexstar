@@ -6,11 +6,11 @@ require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/ipni/go-libipni v0.6.2
-	github.com/libp2p/go-libp2p v0.33.0
+	github.com/ipni/go-libipni v0.6.5
+	github.com/libp2p/go-libp2p v0.33.2
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/multiformats/go-multiaddr v0.12.2
+	github.com/multiformats/go-multiaddr v0.12.3
 	github.com/multiformats/go-multicodec v0.9.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/prometheus/client_golang v1.18.0
@@ -55,7 +55,7 @@ require (
 	golang.org/x/crypto v0.19.0 // indirect
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
 	golang.org/x/sys v0.17.0 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
