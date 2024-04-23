@@ -112,7 +112,14 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	// To make the Delegated Routing output nicer, deduplicate identical records.
 	uniqueProviders := map[uint32]struct{}{}
 	appendIfUnique := func(drp *drProvider) {
-		drpb := make([]byte, 0, len(drp.ID)+len(drp.Protocols)+len(drp.Schema)+len(drp.Metadata))
+		capacity := len(drp.ID) + len(drp.Schema)
+		for _, proto := range drp.Protocols {
+			capacity += len(proto)
+		}
+		for _, meta := range drp.Metadata {
+			capacity += len(meta)
+		}
+		drpb := make([]byte, 0, capacity)
 		drpb = append(drpb, []byte(drp.ID)...)
 		for _, proto := range drp.Protocols {
 			drpb = append(drpb, []byte(proto)...)
