@@ -13,15 +13,12 @@ import (
 	"github.com/ipni/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/multiformats/go-multicodec"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 )
 
 const (
-	peerSchema      = "peer"
-	unknownProtocol = "unknown"
-	unknownSchema   = unknownProtocol
+	peerSchema = "peer"
 )
 
 type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
@@ -115,11 +112,15 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	// To make the Delegated Routing output nicer, deduplicate identical records.
 	uniqueProviders := map[uint32]struct{}{}
 	appendIfUnique := func(drp *drProvider) {
-		drpb := make([]byte, 0, len(drp.ID)+len(drp.Protocol)+len(drp.Schema)+len(drp.Metadata))
+		drpb := make([]byte, 0, len(drp.ID)+len(drp.Protocols)+len(drp.Schema)+len(drp.Metadata))
 		drpb = append(drpb, []byte(drp.ID)...)
-		drpb = append(drpb, []byte(drp.Protocol)...)
+		for _, proto := range drp.Protocols {
+			drpb = append(drpb, []byte(proto)...)
+		}
 		drpb = append(drpb, []byte(drp.Schema)...)
-		drpb = append(drpb, drp.Metadata...)
+		for _, meta := range drp.Metadata {
+			drpb = append(drpb, meta...)
+		}
 		key := crc32.ChecksumIEEE(drpb)
 		if _, ok := uniqueProviders[key]; ok {
 			return
@@ -138,17 +139,21 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 				Addrs:  p.Provider.Addrs,
 			})
 		} else {
+			provider := &drProvider{
+				Schema:   peerSchema,
+				ID:       p.Provider.ID,
+				Addrs:    p.Provider.Addrs,
+				Metadata: make(map[string][]byte),
+			}
+
 			for _, proto := range md.Protocols() {
 				pl := md.Get(proto)
 				plb, _ := pl.MarshalBinary()
-				appendIfUnique(&drProvider{
-					Protocol: proto.String(),
-					Schema:   schemaByProtocolID(proto),
-					ID:       p.Provider.ID,
-					Addrs:    p.Provider.Addrs,
-					Metadata: plb,
-				})
+				provider.Protocols = append(provider.Protocols, proto.String())
+				provider.Metadata[proto.String()] = plb
 			}
+
+			appendIfUnique(provider)
 		}
 	}
 
@@ -161,25 +166,36 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	writeJsonResponse(w, http.StatusOK, outBytes)
 }
 
-func schemaByProtocolID(p multicodec.Code) string {
-	switch p {
-	case multicodec.TransportBitswap:
-		return "bitswap"
-	case multicodec.TransportGraphsyncFilecoinv1:
-		return "graphsync-filecoinv1"
-	default:
-		return unknownProtocol
-	}
-}
-
 type drResp struct {
 	Providers []drProvider
 }
 
 type drProvider struct {
-	Protocol string
-	Schema   string
-	ID       peer.ID
-	Addrs    []multiaddr.Multiaddr
-	Metadata []byte `json:",omitempty"`
+	Protocols []string
+	Schema    string
+	ID        peer.ID
+	Addrs     []multiaddr.Multiaddr
+	Metadata  map[string][]byte
+}
+
+func (dp drProvider) MarshalJSON() ([]byte, error) {
+	m := map[string]interface{}{}
+	if dp.Metadata != nil {
+		for key, val := range dp.Metadata {
+			m[key] = val
+		}
+	}
+
+	m["Schema"] = dp.Schema
+	m["ID"] = dp.ID
+
+	if dp.Addrs != nil {
+		m["Addrs"] = dp.Addrs
+	}
+
+	if dp.Protocols != nil {
+		m["Protocols"] = dp.Protocols
+	}
+
+	return json.Marshal(m)
 }
