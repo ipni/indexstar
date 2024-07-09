@@ -54,8 +54,13 @@ func (s *server) findMultihashSubtree(w http.ResponseWriter, r *http.Request, en
 		smh := path.Base(r.URL.Path)
 		mh, err := multihash.FromB58String(smh)
 		if err != nil {
-			http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
-			return
+			if errors.Is(err, multihash.ErrInvalidMultihash) {
+				mh, err = multihash.FromHexString(smh)
+			}
+			if err != nil {
+				http.Error(w, "invalid multihash: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		s.find(w, r, mh, encrypted)
 	default:
