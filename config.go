@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
-
-	"github.com/mitchellh/go-homedir"
 )
 
 const (
@@ -129,25 +127,29 @@ var (
 	ErrNotInitialized = errors.New("not initialized")
 )
 
-// Filename returns the configuration file path given a configuration root
-// directory. If the configuration root directory is empty, use the default.
-func Filename(configRoot string) (string, error) {
-	return Path(configRoot, DefaultConfigFile)
-}
-
 // Path returns the config file path relative to the configuration root. If an
 // empty string is provided for `configRoot`, the default root is used. If
 // configFile is an absolute path, then configRoot is ignored.
 func Path(configRoot, configFile string) (string, error) {
-	if filepath.IsAbs(configFile) {
-		return filepath.Clean(configFile), nil
-	}
-	if configRoot == "" {
-		var err error
-		configRoot, err = PathRoot()
+	var err error
+	if configFile == "" {
+		configFile = DefaultConfigFile
+	} else {
+		configFile, err = expandHome(configFile)
 		if err != nil {
 			return "", err
 		}
+		if filepath.IsAbs(configFile) {
+			return filepath.Clean(configFile), nil
+		}
+	}
+	if configRoot == "" {
+		configRoot, err = PathRoot()
+	} else {
+		configRoot, err = expandHome(configRoot)
+	}
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(configRoot, configFile), nil
 }
@@ -155,19 +157,21 @@ func Path(configRoot, configFile string) (string, error) {
 // PathRoot returns the default configuration root directory.
 func PathRoot() (string, error) {
 	dir := os.Getenv(EnvDir)
-	if dir != "" {
-		return dir, nil
+	if dir == "" {
+		dir = DefaultPathRoot
 	}
-	return homedir.Expand(DefaultPathRoot)
+	return expandHome(dir)
 }
 
 func Load(filePath string) ([]string, error) {
 	var err error
 	if filePath == "" {
-		filePath, err = Filename("")
-		if err != nil {
-			return nil, err
-		}
+		filePath, err = Path("", "")
+	} else {
+		filePath, err = expandHome(filePath)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	f, err := os.Open(filePath)
@@ -184,4 +188,28 @@ func Load(filePath string) ([]string, error) {
 		return nil, err
 	}
 	return urls, nil
+}
+
+// expandHome expands the path to include the home directory if the path is
+// prefixed with `~`. If it isn't prefixed with `~`, the path is returned
+// as-is.
+func expandHome(path string) (string, error) {
+	if path == "" {
+		return path, nil
+	}
+
+	if path[0] != '~' {
+		return path, nil
+	}
+
+	if len(path) > 1 && path[1] != '/' && path[1] != '\\' {
+		return "", errors.New("cannot expand user-specific home dir")
+	}
+
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(dir, path[1:]), nil
 }
