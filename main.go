@@ -86,7 +86,7 @@ func main() {
 			if configCheckInterval != 0 {
 				cfgPath = s.cfgBase
 				if cfgPath == "" {
-					cfgPath, err = Filename("")
+					cfgPath, err = Path("", "")
 					if err != nil {
 						return err
 					}

@@ -9,7 +9,6 @@ require (
 	github.com/ipni/go-libipni v0.6.11
 	github.com/libp2p/go-libp2p v0.36.2
 	github.com/mercari/go-circuitbreaker v0.0.2
-	github.com/mitchellh/go-homedir v1.1.0
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/multiformats/go-multicodec v0.9.0
 	github.com/multiformats/go-multihash v0.2.3
