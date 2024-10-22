@@ -388,3 +388,208 @@ LOOP:
 	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
 	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 }
+
+func (s *server) doFindStreaming(ctx context.Context, method string, req *url.URL, encrypted bool) (int, chan model.ProviderResult) {
+	start := time.Now()
+	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
+	loadTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
+	defer func() {
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(latencyTags...),
+			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithTags(loadTags...),
+			stats.WithMeasurements(metrics.FindLoad.M(1)))
+	}()
+
+	maxWait := config.Server.ResultStreamMaxWait
+
+	sg := &scatterGather[Backend, any]{
+		backends: s.backends,
+		maxWait:  maxWait,
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type resultWithBackend struct {
+		rslt *encryptedOrPlainResult
+		bknd Backend
+	}
+
+	resultsChan := make(chan *resultWithBackend, 1)
+	var count int32
+	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
+		// forward double hashed requests to double hashed backends only and regular requests to regular backends
+		_, isDhBackend := b.(dhBackend)
+		_, isProvidersBackend := b.(providersBackend)
+		if (encrypted != isDhBackend) || isProvidersBackend {
+			return nil, nil
+		}
+
+		// Copy the URL from original request and override host/schema to point
+		// to the server.
+		endpoint := *req
+		endpoint.Host = b.URL().Host
+		endpoint.Scheme = b.URL().Scheme
+		log := log.With("backend", endpoint.Host)
+
+		req, err := http.NewRequestWithContext(cctx, http.MethodGet, endpoint.String(), nil)
+		if err != nil {
+			log.Warnw("Failed to construct backend query", "err", err)
+			return nil, err
+		}
+		req.Header.Set("X-Forwarded-Host", req.Host)
+		req.Header.Set("Accept", mediaTypeNDJson)
+
+		if !b.Matches(req) {
+			return nil, nil
+		}
+
+		resp, err := s.Client.Do(req)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				log.Debugw("Backend query ended", "err", err)
+			} else {
+				log.Warnw("Failed to query backend", "err", err)
+			}
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+		case http.StatusNotFound:
+			io.Copy(io.Discard, resp.Body)
+			atomic.AddInt32(&count, 1)
+			return nil, nil
+		default:
+			bb, _ := io.ReadAll(resp.Body)
+			body := string(bb)
+			log := log.With("status", resp.StatusCode, "body", body)
+			log.Warn("Request processing was not successful")
+			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
+			if resp.StatusCode < http.StatusInternalServerError {
+				err = circuitbreaker.MarkAsSuccess(err)
+			}
+			return nil, err
+		}
+
+		scanner := bufio.NewScanner(resp.Body)
+		for {
+			select {
+			case <-cctx.Done():
+				return nil, nil
+			default:
+				if scanner.Scan() {
+					var result encryptedOrPlainResult
+					line := scanner.Bytes()
+					if len(line) == 0 {
+						continue
+					}
+					atomic.AddInt32(&count, 1)
+					if err := json.Unmarshal(line, &result); err != nil {
+						return nil, circuitbreaker.MarkAsSuccess(err)
+					}
+					// Sanity check the results in case backends don't respect accept media types;
+					// see: https://github.com/ipni/storetheindex/issues/1209
+					if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						continue
+					}
+
+					select {
+					case <-cctx.Done():
+						return nil, nil
+					case resultsChan <- &resultWithBackend{rslt: &result, bknd: b}:
+					}
+					continue
+				}
+				if err := scanner.Err(); err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						log.Debugw("Reading backend response ended", "err", err)
+					} else {
+						log.Warnw("Failed to read backend response", "err", err)
+					}
+
+					return nil, circuitbreaker.MarkAsSuccess(err)
+				}
+				return nil, nil
+			}
+		}
+	}); err != nil {
+		log.Errorw("Failed to scatter HTTP find request", "err", err)
+		return http.StatusInternalServerError, nil
+	}
+
+	out := make(chan model.ProviderResult)
+
+	// Results chan is done when gathering is finished.
+	// Do this in a separate goroutine to avoid potentially closing results chan twice.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-sg.gather(ctx):
+				if !ok {
+					close(resultsChan)
+					return
+				}
+			}
+		}
+	}()
+
+	go func() {
+		defer close(out)
+
+		results := newResultSet()
+		var rs resultStats
+		var foundCaskade, foundRegular bool
+	LOOP:
+		for {
+			select {
+			case <-ctx.Done():
+				break LOOP
+			case rwb, ok := <-resultsChan:
+				if !ok {
+					break LOOP
+				}
+				result := rwb.rslt
+				absent := results.putIfAbsent(result)
+				if !absent {
+					continue
+				}
+
+				rs.observeResult(result)
+
+				_, isCaskade := rwb.bknd.(caskadeBackend)
+				foundCaskade = foundCaskade || isCaskade
+				foundRegular = foundRegular || !isCaskade
+
+				out <- result.ProviderResult
+			}
+		}
+		_ = stats.RecordWithOptions(context.Background(),
+			stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
+
+		if len(results) == 0 {
+			latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
+			return
+		}
+
+		rs.reportMetrics(method)
+
+		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
+		yesno := func(yn bool) string {
+			if yn {
+				return "yes"
+			}
+			return "no"
+		}
+
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
+		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
+	}()
+
+	return 200, out
+}
