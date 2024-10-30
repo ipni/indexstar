@@ -246,7 +246,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/health", s.health)
 
 	ec := make(chan error)
-	delegated, err := NewDelegatedTranslator(s.doFind)
+	delegated, err := NewDelegatedTranslator(s.doFind, s.doFindStreaming)
 	if err != nil {
 		ec <- err
 		close(ec)
