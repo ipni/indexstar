@@ -1,4 +1,3 @@
 {
-  "skip32bit": true,
-  "go-versions": ["this"]
+  "skip32bit": true
 }
