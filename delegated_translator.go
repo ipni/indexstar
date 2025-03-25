@@ -191,6 +191,9 @@ func (dr *drResp) append(drp *drProvider) bool {
 		drpb = append(drpb, meta...)
 	}
 	key := crc32.ChecksumIEEE(drpb)
+	if dr.seenProviders == nil {
+		dr.seenProviders = make(map[uint32]struct{})
+	}
 	if _, ok := dr.seenProviders[key]; ok {
 		return false
 	}
