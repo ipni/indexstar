@@ -366,9 +366,8 @@ outer:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
-		if len(gatherErrs) == len(sg.backends) {
-			log.Warnw("Request to all backends failed", "errs", gatherErrs)
-			// All backends failed.
+		if len(gatherErrs) != 0 {
+			log.Warnw("Failed to request from backend", "errs", gatherErrs)
 			return http.StatusGatewayTimeout, nil
 		}
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
