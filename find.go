@@ -221,6 +221,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 	type sgResponse struct {
 		rsp  *model.FindResponse
 		bknd Backend
+		err  error
 	}
 
 	sg := &scatterGather[Backend, sgResponse]{
@@ -263,10 +264,11 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				log.Debugw("Backend query ended", "err", err)
+				return nil, err
 			} else {
 				log.Warnw("Failed to query backend", "err", err)
+				return &sgResponse{err: err}, nil
 			}
-			return nil, err
 		}
 		defer resp.Body.Close()
 		data, err := io.ReadAll(resp.Body)
@@ -308,6 +310,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 
 	// TODO: stream out partial response as they come in.
 	var resp model.FindResponse
+	var gatherErrs []error
 	var rs resultStats
 	var foundRegular, foundCaskade bool
 	updateFoundFlags := func(b Backend) {
@@ -318,6 +321,10 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 
 outer:
 	for r := range sg.gather(ctx) {
+		if r.err != nil {
+			gatherErrs = append(gatherErrs, r.err)
+			continue
+		}
 		if len(r.rsp.MultihashResults) > 0 {
 			if resp.MultihashResults == nil {
 				resp.MultihashResults = r.rsp.MultihashResults
@@ -359,6 +366,11 @@ outer:
 		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
 
 	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
+		if len(gatherErrs) == len(sg.backends) {
+			log.Warnw("Request to all backends failed", "errs", gatherErrs)
+			// All backends failed.
+			return http.StatusGatewayTimeout, nil
+		}
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		return http.StatusNotFound, nil
 	}
