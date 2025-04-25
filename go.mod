@@ -6,13 +6,13 @@ require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/ipni/go-libipni v0.6.17
-	github.com/libp2p/go-libp2p v0.41.0
+	github.com/ipni/go-libipni v0.6.18
+	github.com/libp2p/go-libp2p v0.41.1
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/multiformats/go-multiaddr v0.15.0
 	github.com/multiformats/go-multicodec v0.9.0
 	github.com/multiformats/go-multihash v0.2.3
-	github.com/prometheus/client_golang v1.21.0
+	github.com/prometheus/client_golang v1.21.1
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.6
 	go.opencensus.io v0.23.0
