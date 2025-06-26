@@ -25,6 +25,7 @@ var (
 	FoundRegular, _ = tag.NewKey("foundRegular")
 	Version, _      = tag.NewKey("version")
 	Transport, _    = tag.NewKey("transport")
+	Provider, _     = tag.NewKey("provider")
 )
 
 // Measures
@@ -33,6 +34,7 @@ var (
 	FindBackends               = stats.Float64("indexstar/find/backends", "Backends reached in a find request", stats.UnitDimensionless)
 	FindLoad                   = stats.Int64("indexstar/find/load", "Amount of calls to find", stats.UnitDimensionless)
 	FindResponse               = stats.Int64("indexstar/find/response", "Find response stats", stats.UnitDimensionless)
+	TopProvider                = stats.Int64("indexstar/top_provider", "Top providers in responses", stats.UnitDimensionless)
 	HttpDelegatedRoutingMethod = stats.Int64("indexstar/http_delegated_routing/load", "Amount of HTTP delegated routing calls by tagged method", stats.UnitDimensionless)
 )
 
@@ -57,6 +59,11 @@ var (
 		Aggregation: view.Count(),
 		TagKeys:     []tag.Key{Method, Transport},
 	}
+	TopProviderView = &view.View{
+		Measure:     TopProvider,
+		Aggregation: view.LastValue(),
+		TagKeys:     []tag.Key{Provider},
+	}
 	httpDelegRoutingMethodView = &view.View{
 		Measure:     HttpDelegatedRoutingMethod,
 		Aggregation: view.Count(),
@@ -72,6 +79,7 @@ func Start(views []*view.View) http.Handler {
 		findBackendView,
 		findLoadView,
 		findResponseView,
+		TopProviderView,
 		httpDelegRoutingMethodView,
 	)
 	if err != nil {

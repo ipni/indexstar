@@ -343,6 +343,7 @@ outer:
 					}
 					updateFoundFlags(r.bknd)
 					resp.MultihashResults[0].ProviderResults = append(resp.MultihashResults[0].ProviderResults, pr)
+					s.pcounts.Add(string(pr.Provider.ID))
 				}
 			}
 		}
