@@ -29,6 +29,9 @@ const (
 	defaultCascadeCircuitOpenTimeout       = 0
 	defaultCascadeCircuitCounterReset      = 1 * time.Second
 
+	defaultStatMaxProviders         = 10
+	defaultStatProviderReportUpdate = 5 * time.Minute
+
 	// DefaultPathName is the default config dir name.
 	DefaultPathName = ".indexstar"
 	// DefaultPathRoot is the path to the default config dir location.
@@ -41,16 +44,18 @@ const (
 
 var config struct {
 	Server struct {
-		MaxIdleConns        int
-		MaxConnsPerHost     int
-		MaxIdleConnsPerHost int
-		DialerTimeout       time.Duration
-		DialerKeepAlive     time.Duration
-		HttpClientTimeout   time.Duration
-		ResultMaxWait       time.Duration
-		ResultStreamMaxWait time.Duration
-		MaxRequestBodySize  int64
-		CascadeLabels       string
+		MaxIdleConns              int
+		MaxConnsPerHost           int
+		MaxIdleConnsPerHost       int
+		DialerTimeout             time.Duration
+		DialerKeepAlive           time.Duration
+		HttpClientTimeout         time.Duration
+		ResultMaxWait             time.Duration
+		ResultStreamMaxWait       time.Duration
+		MaxRequestBodySize        int64
+		CascadeLabels             string
+		TopProviderCardinality    int
+		TopProviderReportInterval time.Duration
 	}
 	Circuit struct {
 		HalfOpenSuccesses int
@@ -75,6 +80,9 @@ func init() {
 	config.Server.ResultStreamMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_STREAM_MAX_WAIT", defaultServerResultStreamMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)
 	config.Server.CascadeLabels = getEnvOrDefault[string]("SERVER_CASCADE_LABELS", defaultServerCascadeLabels)
+
+	config.Server.TopProviderCardinality = getEnvOrDefault[int]("SERVER_TOP_PROVIDER_CARDINALITY", defaultStatMaxProviders)
+	config.Server.TopProviderReportInterval = getEnvOrDefault[time.Duration]("SERVER_TOP_PROVIDER_REPORT_INVERVAL", defaultStatProviderReportUpdate)
 
 	config.Circuit.HalfOpenSuccesses = getEnvOrDefault[int]("CIRCUIT_HALF_OPEN_SUCCESSES", defaultCircuitHalfOpenSuccesses)
 	config.Circuit.OpenTimeout = getEnvOrDefault[time.Duration]("CIRCUIT_OPEN_TIMEOUT", defaultCircuitOpenTimeout)

@@ -16,6 +16,8 @@ import (
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
 )
 
 var (
@@ -44,6 +46,7 @@ type server struct {
 	indexPage            []byte
 	indexPageCompileTime time.Time
 	pcache               *pcache.ProviderCache
+	pcounts              *ProviderMap
 }
 
 // caskadeBackend is a marker for caskade backends
@@ -72,6 +75,7 @@ func NewServer(c *cli.Context) (*server, error) {
 	cascadeServers := c.StringSlice(cascadeBackendsArg)
 	dhServers := c.StringSlice(dhBackendsArg)
 	providersServers := c.StringSlice(providersBackendsArg)
+	pCounts := NewProviderMap(config.Server.TopProviderCardinality)
 
 	if len(servers) == 0 {
 		if !c.IsSet("config") {
@@ -136,7 +140,7 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 	compileTime := time.Now()
 
-	return &server{
+	s := server{
 		Context:               c.Context,
 		Client:                httpClient,
 		cfgBase:               c.String("config"),
@@ -147,7 +151,21 @@ func NewServer(c *cli.Context) (*server, error) {
 		indexPage:             indexPageBuf.Bytes(),
 		indexPageCompileTime:  compileTime,
 		pcache:                pc,
-	}, nil
+		pcounts:               pCounts,
+	}
+
+	go func() {
+		for {
+			select {
+			case <-c.Context.Done():
+				return
+			case <-time.After(config.Server.TopProviderReportInterval):
+			}
+			s.updateTopProviders()
+		}
+	}()
+
+	return &s, nil
 }
 
 func loadBackends(servers, cascadeServers, dhServers, providersServers []string) ([]Backend, error) {
@@ -232,6 +250,16 @@ func (s *server) Reload(cctx *cli.Context) error {
 	s.backends = b
 
 	return nil
+}
+
+func (s *server) updateTopProviders() {
+	top := s.pcounts.Top()
+	for _, rcrd := range top {
+		_ = stats.RecordWithOptions(
+			context.Background(),
+			stats.WithTags(tag.Insert(metrics.Provider, rcrd.Provider)),
+			stats.WithMeasurements(metrics.TopProvider.M(rcrd.Count)))
+	}
 }
 
 func (s *server) Serve() chan error {
