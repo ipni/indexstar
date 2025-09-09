@@ -1,19 +1,19 @@
 module github.com/ipni/indexstar
 
-go 1.24
+go 1.25
 
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.0
 	github.com/ipfs/go-cid v0.5.0
-	github.com/ipfs/go-log/v2 v2.6.0
-	github.com/ipni/go-libipni v0.6.19
-	github.com/libp2p/go-libp2p v0.42.0
+	github.com/ipfs/go-log/v2 v2.8.1
+	github.com/ipni/go-libipni v0.7.0
+	github.com/libp2p/go-libp2p v0.43.0
 	github.com/mercari/go-circuitbreaker v0.0.2
-	github.com/multiformats/go-multiaddr v0.16.0
+	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multicodec v0.9.2
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/prometheus/client_golang v1.22.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
 	go.opencensus.io v0.23.0
 )
@@ -52,9 +52,9 @@ require (
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
-	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/crypto v0.42.0 // indirect
+	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792 // indirect
+	golang.org/x/sys v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
