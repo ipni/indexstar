@@ -272,6 +272,7 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
+	mux.Handle("/metrics", metrics.Start(nil))
 
 	ec := make(chan error)
 	delegated, err := NewDelegatedTranslator(s.doFind, s.doFindStreaming)
