@@ -121,7 +121,11 @@ func NewServer(c *cli.Context) (*server, error) {
 		}
 		providerSources = append(providerSources, httpSrc)
 	}
-	pc, err := pcache.New(pcache.WithSource(providerSources...))
+
+	pc, err := pcache.New(
+		pcache.WithSource(providerSources...),
+		pcache.WithRefreshInterval(config.Server.PcacheRefreshInterval),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create provider cache: %w", err)
 	}
