@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/mercari/go-circuitbreaker"
 )
@@ -56,12 +57,7 @@ func init() {
 			if !ok {
 				return false
 			}
-			for _, got := range values {
-				if value == got {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(values, value)
 		}
 	}
 }

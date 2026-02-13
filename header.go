@@ -24,8 +24,8 @@ func getAccepts(r *http.Request) (accepts, error) {
 	values := r.Header.Values("Accept")
 	a.acceptHeaderFound = len(values) > 0
 	for _, accept := range values {
-		amts := strings.Split(accept, ",")
-		for _, amt := range amts {
+		amts := strings.SplitSeq(accept, ",")
+		for amt := range amts {
 			if mt, _, err := mime.ParseMediaType(amt); err != nil {
 				return a, err
 			} else if mt == mediaTypeNDJson {

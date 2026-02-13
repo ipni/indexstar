@@ -238,7 +238,7 @@ func drProvFromResult(p model.ProviderResult) *drProvider {
 }
 
 func (dp drProvider) MarshalJSON() ([]byte, error) {
-	m := map[string]interface{}{}
+	m := map[string]any{}
 	if dp.Metadata != nil {
 		for key, val := range dp.Metadata {
 			m[key] = val
