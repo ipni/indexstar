@@ -19,6 +19,10 @@ import (
 
 const (
 	peerSchema = "peer"
+
+	// The application/json responses SHOULD be limited to 100 providers.
+	// https://specs.ipfs.tech/routing/http-routing-v1/#response-body
+	maxNonStreamingResults = 100
 )
 
 type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
@@ -176,6 +180,10 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		}
 
 		out.append(prov)
+
+		if len(out.seenProviders) > maxNonStreamingResults {
+			break
+		}
 	}
 
 	outBytes, err := json.Marshal(out)
