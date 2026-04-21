@@ -243,7 +243,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 					}
 					// Sanity check the results in case backends don't respect accept media types;
 					// see: https://github.com/ipni/storetheindex/issues/1209
-					if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+					if len(result.EncryptedValueKey) == 0 && (result.Provider == nil || result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
 						continue
 					}
 
