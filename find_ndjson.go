@@ -431,9 +431,6 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 		maxWait:  maxWait,
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	type resultWithBackend struct {
 		rslt *encryptedOrPlainResult
 		bknd Backend
