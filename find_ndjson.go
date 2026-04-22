@@ -168,7 +168,7 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 	}
 
 	resultsChan := make(chan *resultWithBackend, 1)
-	var count int32
+	var backendsCount atomic.Int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
@@ -196,6 +196,8 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 			return nil, nil
 		}
 
+		log.Debugw("sending ndjson request", "url", req.URL.String())
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -209,15 +211,20 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			backendsCount.Add(1)
 		case http.StatusNotFound:
 			io.Copy(io.Discard, resp.Body)
-			atomic.AddInt32(&count, 1)
+			backendsCount.Add(1)
+			log.Debugw("not found response", "url", req.URL.String())
 			return nil, nil
 		default:
 			bb, _ := io.ReadAll(resp.Body)
 			body := string(bb)
-			log := log.With("status", resp.StatusCode, "body", body)
-			log.Warn("Request processing was not successful")
+			log.Warn(
+				"Request processing was not successful",
+				"status", resp.StatusCode,
+				"body", body[:min(len(body), 1000)],
+			)
 			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
 			if resp.StatusCode < http.StatusInternalServerError {
 				err = circuitbreaker.MarkAsSuccess(err)
@@ -226,24 +233,29 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		providersCount := 0
 		for {
 			select {
 			case <-cctx.Done():
 				return nil, nil
 			default:
+
 				if scanner.Scan() {
 					var result encryptedOrPlainResult
 					line := scanner.Bytes()
 					if len(line) == 0 {
 						continue
 					}
-					atomic.AddInt32(&count, 1)
+
+					providersCount++
 					if err := json.Unmarshal(line, &result); err != nil {
+						log.Debugw("failed to unmarshal backend response line", "line", string(line), "err", err)
 						return nil, circuitbreaker.MarkAsSuccess(err)
 					}
 					// Sanity check the results in case backends don't respect accept media types;
 					// see: https://github.com/ipni/storetheindex/issues/1209
 					if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						log.Debugw("skipping malformed result", "line", string(line), "err", err)
 						continue
 					}
 
@@ -263,6 +275,10 @@ func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, source
 
 					return nil, circuitbreaker.MarkAsSuccess(err)
 				}
+				log.Debugw(
+					"Finished processing results from backend",
+					"providersCount", providersCount,
+				)
 				return nil, nil
 			}
 		}
@@ -345,7 +361,13 @@ LOOP:
 		}
 	}
 	_ = stats.RecordWithOptions(context.Background(),
-		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
+		stats.WithMeasurements(metrics.FindBackends.M(float64(backendsCount.Load()))))
+
+	log.Debugw(
+		"Completed processing find results",
+		"totalUnique", len(results),
+		"backends", backendsCount.Load(),
+	)
 
 	if len(results) == 0 {
 		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
@@ -418,7 +440,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 	}
 
 	resultsChan := make(chan *resultWithBackend, 1)
-	var count int32
+	var backendsCount atomic.Int32
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
@@ -446,6 +468,8 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 			return nil, nil
 		}
 
+		log.Debugw("sending ndjson request", "url", req.URL.String())
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -459,15 +483,20 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			backendsCount.Add(1)
 		case http.StatusNotFound:
 			io.Copy(io.Discard, resp.Body)
-			atomic.AddInt32(&count, 1)
+			backendsCount.Add(1)
+			log.Debugw("not found response", "url", req.URL.String())
 			return nil, nil
 		default:
 			bb, _ := io.ReadAll(resp.Body)
 			body := string(bb)
-			log := log.With("status", resp.StatusCode, "body", body)
-			log.Warn("Request processing was not successful")
+			log.Warnw(
+				"Request processing was not successful",
+				"status", resp.StatusCode,
+				"body", body[:min(len(body), 1000)],
+			)
 			err := fmt.Errorf("status %d response from backend %s", resp.StatusCode, b.URL().Host)
 			if resp.StatusCode < http.StatusInternalServerError {
 				err = circuitbreaker.MarkAsSuccess(err)
@@ -476,6 +505,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		providersCount := 0
 		for {
 			select {
 			case <-cctx.Done():
@@ -487,13 +517,16 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 					if len(line) == 0 {
 						continue
 					}
-					atomic.AddInt32(&count, 1)
+
+					providersCount++
 					if err := json.Unmarshal(line, &result); err != nil {
+						log.Debugw("failed to unmarshal backend response line", "line", string(line), "err", err)
 						return nil, circuitbreaker.MarkAsSuccess(err)
 					}
 					// Sanity check the results in case backends don't respect accept media types;
 					// see: https://github.com/ipni/storetheindex/issues/1209
 					if len(result.EncryptedValueKey) == 0 && (result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						log.Debugw("skipping malformed result", "line", string(line), "err", err)
 						continue
 					}
 
@@ -513,6 +546,10 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 
 					return nil, circuitbreaker.MarkAsSuccess(err)
 				}
+				log.Debugw(
+					"Finished processing results from backend",
+					"providersCount", providersCount,
+				)
 				return nil, nil
 			}
 		}
@@ -570,7 +607,13 @@ func (s *server) doFindStreaming(ctx context.Context, method string, req *url.UR
 			}
 		}
 		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
+			stats.WithMeasurements(metrics.FindBackends.M(float64(backendsCount.Load()))))
+
+		log.Debugw(
+			"Completed processing find results",
+			"totalUnique", len(results),
+			"backends", backendsCount.Load(),
+		)
 
 		if len(results) == 0 {
 			latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
