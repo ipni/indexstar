@@ -19,6 +19,10 @@ import (
 
 const (
 	peerSchema = "peer"
+
+	// The application/json responses SHOULD be limited to 100 providers.
+	// https://specs.ipfs.tech/routing/http-routing-v1/#response-body
+	maxNonStreamingResults = 100
 )
 
 type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
@@ -93,6 +97,12 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		return
 	}
 
+	flt, err := getFilters(r)
+	if err != nil {
+		http.Error(w, "invalid filter query parameter", http.StatusBadRequest)
+		return
+	}
+
 	switch {
 	case acc.ndjson:
 		rcode, respChan := dt.sbe(r.Context(), findMethodDelegated, uri, encrypted)
@@ -106,16 +116,23 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		encoder := json.NewEncoder(w)
 
 		for rcrd := range respChan {
-			if !hasWritten {
-				w.Header().Set("Content-Type", mediaTypeNDJson)
-				w.Header().Set("Connection", "Keep-Alive")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.WriteHeader(200)
-				hasWritten = true
-			}
 			prov := drProvFromResult(rcrd)
+
+			if !flt.apply(prov) {
+				// provider does not pass the filters, skip it.
+				continue
+			}
+
 			// if new
 			if out.append(prov) {
+				if !hasWritten {
+					w.Header().Set("Content-Type", mediaTypeNDJson)
+					w.Header().Set("Connection", "Keep-Alive")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(200)
+					hasWritten = true
+				}
+
 				if err := encoder.Encode(prov); err != nil {
 					return
 				}
@@ -160,7 +177,17 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	// To make the Delegated Routing output nicer, deduplicate identical records.
 
 	for _, p := range res.ProviderResults {
-		out.append(drProvFromResult(p))
+		prov := drProvFromResult(p)
+
+		if !flt.apply(prov) {
+			continue
+		}
+
+		out.append(prov)
+
+		if len(out.seenProviders) > maxNonStreamingResults {
+			break
+		}
 	}
 
 	outBytes, err := json.Marshal(out)
