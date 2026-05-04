@@ -45,9 +45,9 @@ func (sg *scatterGather[B, R]) scatter(ctx context.Context, forEach func(context
 				if errors.Is(err, context.Canceled) {
 					log.Debugw("Scatter on target canceled", "target", target.URL().Host)
 				} else if errors.Is(err, context.DeadlineExceeded) {
-					log.Debugw("failed to scatter on target because context deadline exceeded", "target", target.URL().Host, "maxWait", sg.maxWait)
+					log.Debugw("failed to scatter on target because context deadline exceeded", "target", target.URL().Host, "maxWait", sg.maxWait.String())
 				} else {
-					log.Errorw("failed to scatter on target", "target", target.URL().Host, "err", err, "maxWait", sg.maxWait)
+					log.Errorw("failed to scatter on target", "target", target.URL().Host, "err", err, "maxWait", sg.maxWait.String())
 				}
 				return
 			}

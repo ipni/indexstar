@@ -260,6 +260,8 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 			return nil, nil
 		}
 
+		log.Debugw("sending json request", "url", req.URL.String())
+
 		resp, err := s.Client.Do(req)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -281,6 +283,8 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 			}
 			return nil, err
 		}
+
+		log.Debugw("finished reading response body", "responseSize", len(data))
 
 		switch resp.StatusCode {
 		case http.StatusOK:

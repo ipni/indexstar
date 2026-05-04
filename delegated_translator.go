@@ -25,7 +25,10 @@ type findFunc func(ctx context.Context, method, source string, req *url.URL, enc
 type findStreamFunc func(ctx context.Context, method string, req *url.URL, encrypted bool) (int, chan model.ProviderResult)
 
 func NewDelegatedTranslator(backend findFunc, streamingBackend findStreamFunc) (http.Handler, error) {
-	finder := delegatedTranslator{backend, streamingBackend}
+	finder := delegatedTranslator{
+		be:  backend,
+		sbe: streamingBackend,
+	}
 	m := http.NewServeMux()
 	m.HandleFunc("/providers", finder.provide)
 	m.HandleFunc("/encrypted/providers", finder.provide)
@@ -97,6 +100,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 			http.Error(w, "", rcode)
 			return
 		}
+
 		out := &drResp{}
 		hasWritten := false
 		encoder := json.NewEncoder(w)
