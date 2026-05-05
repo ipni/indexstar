@@ -439,14 +439,6 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 	start := time.Now()
 	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
 	loadTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
-	defer func() {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(latencyTags...),
-			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(loadTags...),
-			stats.WithMeasurements(metrics.FindLoad.M(1)))
-	}()
 
 	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL)
 	if err != nil {
@@ -456,7 +448,16 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 	out := make(chan model.ProviderResult)
 
 	go func() {
-		defer close(out)
+		defer func() {
+			close(out)
+
+			_ = stats.RecordWithOptions(context.Background(),
+				stats.WithTags(latencyTags...),
+				stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
+			_ = stats.RecordWithOptions(context.Background(),
+				stats.WithTags(loadTags...),
+				stats.WithMeasurements(metrics.FindLoad.M(1)))
+		}()
 
 		results := newResultSet()
 		var rs resultStats
