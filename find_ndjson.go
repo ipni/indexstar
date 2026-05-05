@@ -287,8 +287,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 	// Results chan is done when gathering is finished.
 	// Do this in a separate goroutine to avoid potentially closing results chan twice.
 	go func() {
-		for range sg.gather(ctx) {
-		}
+		sg.wg.Wait()
 
 		close(resultsChan)
 
