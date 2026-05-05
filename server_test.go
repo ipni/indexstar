@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/net/nettest"
+
+	logging "github.com/ipfs/go-log/v2"
 )
 
 type serverTestSuite struct {
@@ -36,8 +38,10 @@ func TestServerTestSuite(t *testing.T) {
 	suite.Run(t, new(serverTestSuite))
 }
 
-func (s *serverTestSuite) SetupSuite() {
+func (s *serverTestSuite) SetupTest() {
 	t := s.T()
+
+	logging.SetDebugLogging()
 
 	s.testBackendServer = httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,16 +60,6 @@ func (s *serverTestSuite) SetupSuite() {
 	metricsListener, err := nettest.NewLocalListener("tcp")
 	require.NoError(t, err)
 	s.metricsListener = metricsListener
-}
-
-func (s *serverTestSuite) TearDownSuite() {
-	s.srvListener.Close()
-	s.metricsListener.Close()
-	s.testBackendServer.Close()
-}
-
-func (s *serverTestSuite) SetupTest() {
-	t := s.T()
 
 	s.backendHandler = nil
 
@@ -95,9 +89,9 @@ func (s *serverTestSuite) TearDownTest() {
 		require.NoError(s.T(), err)
 	}
 
-	s.srvCancel = nil
-	s.srv = nil
-	s.backendHandler = nil
+	s.srvListener.Close()
+	s.metricsListener.Close()
+	s.testBackendServer.Close()
 }
 
 func writeOneLineJSON(t *testing.T, w io.Writer, j string) {
@@ -202,4 +196,39 @@ func (s *serverTestSuite) TestStreamingFind() {
 	`, dataSplit[1])
 
 	require.Empty(t, dataSplit[2])
+}
+
+func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
+	t := s.T()
+
+	const cid = "bafybeigdyrzt5m6h6g5y2l3n4j5s7q4z6w7x8y9z0a1b2c3d4e5f6g7h8i9j0"
+
+	for _, data := range []string{
+		`{"ContextID":"ctx1", "Metadata":"gBI="}`,
+		`NOT-A-JSON_STRING`,
+	} {
+		s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, `/cid/`+cid, r.URL.Path)
+			require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(data))
+		}
+
+		req, err := http.NewRequest(
+			http.MethodGet,
+			fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cid),
+			nil,
+		)
+		require.NoError(t, err)
+
+		req.Header.Set("Accept", "application/x-ndjson")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+		data, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.Empty(t, data)
+	}
 }
