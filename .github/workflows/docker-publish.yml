@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'main'
+      - 'measure-pinata-latency'
     tags:
       - 'v*'
   workflow_run:
