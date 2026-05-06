@@ -185,7 +185,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 
 		out.append(prov)
 
-		if len(out.seenProviders) > maxNonStreamingResults {
+		if len(out.seenProviders) >= maxNonStreamingResults {
 			break
 		}
 	}

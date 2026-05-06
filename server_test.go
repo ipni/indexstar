@@ -12,10 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/net/nettest"
 
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 )
 
@@ -110,10 +113,10 @@ func writeOneLineJSON(t *testing.T, w io.Writer, j string) {
 func (s *serverTestSuite) TestStreamingFind() {
 	t := s.T()
 
-	const cid = "bafybeigdyrzt5m6h6g5y2l3n4j5s7q4z6w7x8y9z0a1b2c3d4e5f6g7h8i9j0"
+	const cidStr = "bafybeigdyrzt5m6h6g5y2l3n4j5s7q4z6w7x8y9z0a1b2c3d4e5f6g7h8i9j0"
 
 	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, `/cid/`+cid, r.URL.Path)
+		require.Equal(t, `/cid/`+cidStr, r.URL.Path)
 		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.WriteHeader(http.StatusOK)
@@ -150,7 +153,7 @@ func (s *serverTestSuite) TestStreamingFind() {
 
 	req, err := http.NewRequest(
 		http.MethodGet,
-		fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cid),
+		fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cidStr),
 		nil,
 	)
 	require.NoError(t, err)
@@ -201,14 +204,14 @@ func (s *serverTestSuite) TestStreamingFind() {
 func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
 	t := s.T()
 
-	const cid = "bafybeigdyrzt5m6h6g5y2l3n4j5s7q4z6w7x8y9z0a1b2c3d4e5f6g7h8i9j0"
+	const cidStr = "bafybeigdyrzt5m6h6g5y2l3n4j5s7q4z6w7x8y9z0a1b2c3d4e5f6g7h8i9j0"
 
 	for _, data := range []string{
 		`{"ContextID":"ctx1", "Metadata":"gBI="}`,
 		`NOT-A-JSON_STRING`,
 	} {
 		s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, `/cid/`+cid, r.URL.Path)
+			require.Equal(t, `/cid/`+cidStr, r.URL.Path)
 			require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
 			w.Header().Set("Content-Type", "application/x-ndjson")
 			w.WriteHeader(http.StatusOK)
@@ -217,7 +220,7 @@ func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
 
 		req, err := http.NewRequest(
 			http.MethodGet,
-			fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cid),
+			fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cidStr),
 			nil,
 		)
 		require.NoError(t, err)
@@ -231,4 +234,75 @@ func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
 		require.NoError(t, err)
 		require.Empty(t, data)
 	}
+}
+
+func randomPeerID(t *testing.T) peer.ID {
+	_, pub, err := crypto.GenerateEd25519Key(nil)
+	require.NoError(t, err)
+
+	id, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+
+	return id
+}
+
+func (s *serverTestSuite) TestLargeJSONResponse() {
+	t := s.T()
+
+	type (
+		list = []any
+		dict = map[string]any
+	)
+
+	const cidStr = "QmeLvFK9dBLhC3kbfc58mLntUei6s7fZUGWsm1xJhczm1S"
+
+	decodedCid, err := cid.Decode(cidStr)
+	require.NoError(t, err)
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+cidStr, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/json")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		data := list{}
+		for i := range 200 {
+			data = append(data, dict{
+				"ContextID": "AXESIFBXwfY5v1krna9B2bzjlxEoRTG4avb/uIGFHJbGjtL4",
+				"Metadata":  "oBIA",
+				"Provider": dict{
+					"ID": randomPeerID(t),
+					"Addrs": list{
+						fmt.Sprintf("/ip4/1.2.3.4/tcp/%d", 30000+i),
+					},
+				},
+			})
+		}
+		err = json.NewEncoder(w).Encode(dict{
+			"MultihashResults": list{dict{
+				"Multihash":       decodedCid.Hash(),
+				"ProviderResults": data,
+			}},
+		})
+		require.NoError(t, err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cidStr),
+		nil,
+	)
+	require.NoError(t, err)
+
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var response struct {
+		Providers []struct{}
+	}
+	err = json.NewDecoder(resp.Body).Decode(&response)
+	require.NoError(t, err)
+	require.Len(t, response.Providers, 100)
 }

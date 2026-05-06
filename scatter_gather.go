@@ -30,7 +30,7 @@ func (sg *scatterGather[B, R]) scatter(ctx context.Context, forEach func(context
 
 			select {
 			case <-ctx.Done():
-				log.Errorw("context is done before completing scatter", "err", ctx.Err())
+				log.Debugw("context is done before completing scatter", "err", ctx.Err())
 				return
 			default:
 			}
