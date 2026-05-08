@@ -16,8 +16,6 @@ import (
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/urfave/cli/v2"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
 )
 
 var (
@@ -159,13 +157,16 @@ func NewServer(c *cli.Context) (*server, error) {
 	}
 
 	go func() {
+		tick := time.Tick(config.Server.TopProviderReportInterval)
+
 		for {
 			select {
 			case <-c.Context.Done():
 				return
-			case <-time.After(config.Server.TopProviderReportInterval):
+
+			case <-tick:
+				s.updateTopProviders()
 			}
-			s.updateTopProviders()
 		}
 	}()
 
@@ -258,11 +259,12 @@ func (s *server) Reload(cctx *cli.Context) error {
 
 func (s *server) updateTopProviders() {
 	top := s.pcounts.Top()
+
+	// clear all labels to not report providers that are no longer in the top
+	metrics.TopProvider.DeletePartialMatch(nil)
+
 	for _, rcrd := range top {
-		_ = stats.RecordWithOptions(
-			context.Background(),
-			stats.WithTags(tag.Insert(metrics.Provider, rcrd.Provider)),
-			stats.WithMeasurements(metrics.TopProvider.M(rcrd.Count)))
+		metrics.TopProvider.WithLabelValues(rcrd.Provider).Set(float64(rcrd.Count))
 	}
 }
 
@@ -276,7 +278,6 @@ func (s *server) Serve() chan error {
 	mux.HandleFunc("/providers", s.providers)
 	mux.HandleFunc("/providers/", s.provider)
 	mux.HandleFunc("/health", s.health)
-	mux.Handle("/metrics", metrics.Start(nil))
 
 	ec := make(chan error)
 	delegated, err := NewDelegatedTranslator(s.doFind, s.doFindStreaming)
@@ -316,7 +317,7 @@ func (s *server) Serve() chan error {
 	}()
 
 	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", metrics.Start(nil))
+	metricsMux.Handle("/metrics", metrics.WithMetrics())
 	metricsMux.Handle("/pprof", metrics.WithProfile())
 	metricsServ := http.Server{
 		Handler: http.MaxBytesHandler(metricsMux, config.Server.MaxRequestBodySize),
