@@ -144,6 +144,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 	maxWait time.Duration,
 	encrypted bool,
 	reqURL *url.URL,
+	method string,
 ) (
 	chan *resultWithBackend,
 	error,
@@ -185,13 +186,37 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 		log.Debugw("sending ndjson request", "url", req.URL.String())
 
+		validBackendEntriesCount := 0
+		malformedBackendEntriesCount := 0
+
+		start := time.Now()
+		measureBackendLatency := func(errKind metrics.ErrKind) {
+			metrics.ReportFindBackendMetrics(
+				b.URL().Host,
+				method,
+				false,
+				errKind,
+				time.Since(start),
+				validBackendEntriesCount,
+				malformedBackendEntriesCount,
+			)
+		}
+
 		resp, err := s.Client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Backend query ended", "err", err)
-			} else {
-				log.Warnw("Failed to query backend", "err", err)
-			}
+		switch {
+		case errors.Is(err, context.Canceled):
+			measureBackendLatency(metrics.ErrKindRequestCanceled)
+			log.Debugw("Backend query ended", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			measureBackendLatency(metrics.ErrKindRequestDeadline)
+			log.Debugw("Backend query timed out", "err", err)
+			return nil, err
+
+		case err != nil:
+			measureBackendLatency(metrics.ErrKindRequestFailed)
+			log.Warnw("Failed to query backend", "err", err)
 			return nil, err
 		}
 		defer resp.Body.Close()
@@ -199,12 +224,16 @@ func (s *server) fetchUpstreamNDJsonResponses(
 		switch resp.StatusCode {
 		case http.StatusOK:
 			backendsCount.Add(1)
+
 		case http.StatusNotFound:
+			measureBackendLatency(metrics.ErrKindNotFound)
 			io.Copy(io.Discard, resp.Body)
 			backendsCount.Add(1)
 			log.Debugw("not found response", "url", req.URL.String())
 			return nil, nil
+
 		default:
+			measureBackendLatency(metrics.ErrKindHttpStatus(resp.StatusCode))
 			bb, _ := io.ReadAll(resp.Body)
 			body := string(bb)
 			log.Warnw(
@@ -235,6 +264,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 					providersCount++
 					if err := json.Unmarshal(line, &result); err != nil {
+						measureBackendLatency(metrics.ErrKindUnmarshalFailed)
 						log.Debugw(
 							"failed to unmarshal backend response line",
 							"line", string(line),
@@ -246,6 +276,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 					// Sanity check the results in case backends don't respect accept media types;
 					// see: https://github.com/ipni/storetheindex/issues/1209
 					if len(result.EncryptedValueKey) == 0 && (result.Provider == nil || result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						malformedBackendEntriesCount++
 						log.Debugw(
 							"skipping malformed result",
 							"line", string(line),
@@ -254,6 +285,8 @@ func (s *server) fetchUpstreamNDJsonResponses(
 						)
 						continue
 					}
+
+					validBackendEntriesCount++
 
 					select {
 					case <-cctx.Done():
@@ -264,14 +297,21 @@ func (s *server) fetchUpstreamNDJsonResponses(
 					continue
 				}
 				if err := scanner.Err(); err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						log.Debugw("Reading backend response ended", "err", err)
-					} else {
+					switch {
+					case errors.Is(err, context.Canceled):
+						measureBackendLatency(metrics.ErrKindReadCanceled)
+						log.Debugw("Reading backend response cancelled", "err", err)
+					case errors.Is(err, context.DeadlineExceeded):
+						measureBackendLatency(metrics.ErrKindReadDeadline)
+						log.Debugw("Reading backend response timed out", "err", err)
+					default:
+						measureBackendLatency(metrics.ErrKindReadFailed)
 						log.Warnw("Failed to read backend response", "err", err)
 					}
-
 					return nil, circuitbreaker.MarkAsSuccess(err)
 				}
+
+				measureBackendLatency(metrics.ErrKindNone)
 				log.Debugw(
 					"Finished processing results from backend",
 					"providersCount", providersCount,
@@ -324,7 +364,7 @@ func (s *server) doFindNDJson(
 
 	start := time.Now()
 
-	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL)
+	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL, method)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -351,7 +391,7 @@ func (s *server) doFindNDJson(
 			rs.reportMetrics(method)
 		}
 
-		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, start)
+		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
 		metrics.FindLoad.WithLabelValues(method).Inc()
 	}()
 
@@ -431,7 +471,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 
 	start := time.Now()
 
-	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL)
+	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL, method)
 	if err != nil {
 		return http.StatusInternalServerError, nil
 	}
@@ -450,7 +490,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 				rs.reportMetrics(method)
 			}
 
-			metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, start)
+			metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
 			metrics.FindLoad.WithLabelValues(method).Inc()
 		}()
 

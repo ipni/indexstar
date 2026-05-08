@@ -250,25 +250,54 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 
 		log.Debugw("sending json request", "url", req.URL.String())
 
-		resp, err := s.Client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Backend query ended", "err", err)
-				return nil, err
-			} else {
-				log.Warnw("Failed to query backend", "err", err)
-				return &sgResponse{err: err}, nil
-			}
+		start := time.Now()
+		backendMetrics := func(entriesCount int, errKind metrics.ErrKind) {
+			metrics.ReportFindBackendMetrics(
+				b.URL().Host,
+				source,
+				false,
+				errKind,
+				time.Since(start),
+				entriesCount,
+				0,
+			)
 		}
-		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
 
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Reading backend response ended", "err", err)
-			} else {
-				log.Warnw("Failed to read backend response", "err", err)
-			}
+		resp, err := s.Client.Do(req)
+		switch {
+		case errors.Is(err, context.Canceled):
+			backendMetrics(0, metrics.ErrKindRequestCanceled)
+			log.Debugw("Backend query canceled", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			backendMetrics(0, metrics.ErrKindRequestDeadline)
+			log.Debugw("Backend query deadline exceeded", "err", err)
+			return nil, err
+
+		case err != nil:
+			backendMetrics(0, metrics.ErrKindRequestFailed)
+			log.Warnw("Failed to query backend", "err", err)
+			return &sgResponse{err: err}, nil
+		}
+
+		defer resp.Body.Close()
+
+		data, err := io.ReadAll(resp.Body)
+		switch {
+		case errors.Is(err, context.Canceled):
+			backendMetrics(0, metrics.ErrKindReadCanceled)
+			log.Debugw("Reading backend response ended", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			backendMetrics(0, metrics.ErrKindReadDeadline)
+			log.Debugw("Failed to read backend response", "err", err)
+			return nil, err
+
+		case err != nil:
+			backendMetrics(0, metrics.ErrKindReadFailed)
+			log.Warnw("Failed to read backend response", "err", err)
 			return nil, err
 		}
 
@@ -279,13 +308,25 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 			atomic.AddInt32(&count, 1)
 			providers, err := model.UnmarshalFindResponse(data)
 			if err != nil {
+				backendMetrics(0, metrics.ErrKindUnmarshalFailed)
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
+
+			entriesCount := 0
+			for _, mr := range providers.MultihashResults {
+				entriesCount += len(mr.ProviderResults)
+			}
+			backendMetrics(entriesCount, metrics.ErrKindNone)
+
 			return &sgResponse{bknd: b, rsp: providers}, nil
+
 		case http.StatusNotFound:
+			backendMetrics(0, metrics.ErrKindNotFound)
 			atomic.AddInt32(&count, 1)
 			return nil, nil
+
 		default:
+			backendMetrics(0, metrics.ErrKindHttpStatus(resp.StatusCode))
 			body := string(data)
 			log := log.With("status", resp.StatusCode, "body", body)
 			log.Warn("Request processing was not successful")
@@ -314,7 +355,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 	}
 
 	defer func() {
-		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, start)
+		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
 		metrics.FindLoad.WithLabelValues(source).Inc()
 	}()
 
