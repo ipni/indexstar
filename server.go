@@ -333,12 +333,23 @@ func (s *server) Serve() chan error {
 		defer close(ec)
 
 		<-s.Context.Done()
-		err := serv.Shutdown(s.Context)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.ShutdownTimeout)
+		defer cancel()
+
+		err := serv.Shutdown(shutdownCtx)
 		if err != nil {
-			log.Warnw("failed shutdown", "err", err)
+			log.Warnw("failed to shutdown", "err", err)
+			ec <- err
+		}
+
+		err = metricsServ.Shutdown(shutdownCtx)
+		if err != nil {
+			log.Warnw("failed to shutdown metrics server", "err", err)
 			ec <- err
 		}
 	}()
+
 	return ec
 }
 
