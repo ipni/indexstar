@@ -279,7 +279,12 @@ func (s *server) Serve() chan error {
 	mux.Handle("/metrics", metrics.Start(nil))
 
 	ec := make(chan error)
-	delegated, err := NewDelegatedTranslator(s.doFind, s.doFindStreaming)
+	delegated, err := NewDelegatedTranslator(
+		s.doFind,
+		s.doFindStreaming,
+		config.DelegatedRouting.CacheControlSuccessHeader,
+		config.DelegatedRouting.CacheControlNotFoundHeader,
+	)
 	if err != nil {
 		ec <- err
 		close(ec)

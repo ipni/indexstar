@@ -319,7 +319,8 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 		RequestNDJson bool
 		RequestMethod string
 
-		EmptyResponse bool
+		EmptyResponse  bool
+		NoCacheControl bool
 
 		ExpectedContentType    string
 		ExpectedStatusCode     int
@@ -362,6 +363,7 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 			RequestNDJson:          false,
 			RequestMethod:          http.MethodPost,
 			EmptyResponse:          false,
+			NoCacheControl:         true,
 			ExpectedContentType:    "text/plain",
 			ExpectedStatusCode:     http.StatusMethodNotAllowed,
 			ExpectedAllowedMethods: []string{"GET", "OPTIONS"},
@@ -371,6 +373,7 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 			RequestNDJson:          true,
 			RequestMethod:          http.MethodPost,
 			EmptyResponse:          false,
+			NoCacheControl:         true,
 			ExpectedContentType:    "text/plain",
 			ExpectedStatusCode:     http.StatusMethodNotAllowed,
 			ExpectedAllowedMethods: []string{"GET", "OPTIONS"},
@@ -448,7 +451,15 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 			require.Equal(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET, OPTIONS")
 			require.Equal(t, resp.Header.Get("X-Content-Type-Options"), "nosniff")
 			require.Equal(t, resp.Header.Get("Vary"), "Accept")
-			require.Equal(t, resp.Header.Get("Cache-Control"), "public")
+
+			if !dd.NoCacheControl {
+				cc := resp.Header.Get("Cache-Control")
+				require.Contains(t, cc, "public")
+				require.Contains(t, cc, "max-age")
+				require.Contains(t, cc, "s-maxage")
+				require.Contains(t, cc, "stale-while-revalidate")
+				require.Contains(t, cc, "stale-if-error")
+			}
 
 			require.Equal(t, dd.ExpectedStatusCode, resp.StatusCode)
 			require.Contains(t, resp.Header.Get("Content-Type"), dd.ExpectedContentType)

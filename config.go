@@ -30,6 +30,9 @@ const (
 	defaultCascadeCircuitOpenTimeout       = 0
 	defaultCascadeCircuitCounterReset      = 1 * time.Second
 
+	defaultDelegatedRoutingCacheControlSuccessHeader  = "public, max-age=300, s-maxage=300, stale-while-revalidate=60, stale-if-error=120"
+	defaultDelegatedRoutingCacheControlNotFoundHeader = "public, max-age=300, s-maxage=300, stale-while-revalidate=60, stale-if-error=120"
+
 	defaultStatMaxProviders         = 10
 	defaultStatProviderReportUpdate = 5 * time.Minute
 
@@ -69,6 +72,10 @@ var config struct {
 		OpenTimeout       time.Duration
 		CounterReset      time.Duration
 	}
+	DelegatedRouting struct {
+		CacheControlSuccessHeader  string
+		CacheControlNotFoundHeader string
+	}
 }
 
 func init() {
@@ -94,6 +101,9 @@ func init() {
 	config.CascadeCircuit.HalfOpenSuccesses = getEnvOrDefault[int]("CASCADE_CIRCUIT_HALF_OPEN_SUCCESSES", defaultCascadeCircuitHalfOpenSuccesses)
 	config.CascadeCircuit.OpenTimeout = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_OPEN_TIMEOUT", defaultCascadeCircuitOpenTimeout)
 	config.CascadeCircuit.CounterReset = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_COUNTER_RESET", defaultCascadeCircuitCounterReset)
+
+	config.DelegatedRouting.CacheControlSuccessHeader = getEnvOrDefault[string]("DELEGATED_ROUTING_CACHE_CONTROL_SUCCESS_HEADER", defaultDelegatedRoutingCacheControlSuccessHeader)
+	config.DelegatedRouting.CacheControlNotFoundHeader = getEnvOrDefault[string]("DELEGATED_ROUTING_CACHE_CONTROL_NOT_FOUND_HEADER", defaultDelegatedRoutingCacheControlNotFoundHeader)
 }
 
 func getEnvOrDefault[T any](key string, def T) T {
