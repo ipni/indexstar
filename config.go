@@ -31,6 +31,7 @@ const (
 	defaultCascadeCircuitOpenTimeout       = 0
 	defaultCascadeCircuitCounterReset      = 1 * time.Second
 
+	defaultDelegatedRoutingMaxJSONEntries             = 100
 	defaultDelegatedRoutingCacheControlSuccessHeader  = "public, max-age=300, s-maxage=300, stale-while-revalidate=60, stale-if-error=120"
 	defaultDelegatedRoutingCacheControlNotFoundHeader = "public, max-age=300, s-maxage=300, stale-while-revalidate=60, stale-if-error=120"
 
@@ -75,6 +76,7 @@ var config struct {
 		CounterReset      time.Duration
 	}
 	DelegatedRouting struct {
+		MaxJSONEntries             int
 		CacheControlSuccessHeader  string
 		CacheControlNotFoundHeader string
 	}
@@ -105,6 +107,9 @@ func init() {
 	config.CascadeCircuit.OpenTimeout = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_OPEN_TIMEOUT", defaultCascadeCircuitOpenTimeout)
 	config.CascadeCircuit.CounterReset = getEnvOrDefault[time.Duration]("CASCADE_CIRCUIT_COUNTER_RESET", defaultCascadeCircuitCounterReset)
 
+	// The application/json responses SHOULD be limited to 100 providers.
+	// https://specs.ipfs.tech/routing/http-routing-v1/#response-body
+	config.DelegatedRouting.MaxJSONEntries = getEnvOrDefault[int]("DELEGATED_ROUTING_MAX_JSON_ENTRIES", defaultDelegatedRoutingMaxJSONEntries)
 	config.DelegatedRouting.CacheControlSuccessHeader = getEnvOrDefault[string]("DELEGATED_ROUTING_CACHE_CONTROL_SUCCESS_HEADER", defaultDelegatedRoutingCacheControlSuccessHeader)
 	config.DelegatedRouting.CacheControlNotFoundHeader = getEnvOrDefault[string]("DELEGATED_ROUTING_CACHE_CONTROL_NOT_FOUND_HEADER", defaultDelegatedRoutingCacheControlNotFoundHeader)
 }
