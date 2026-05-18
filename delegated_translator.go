@@ -13,8 +13,6 @@ import (
 	"github.com/ipni/indexstar/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
 )
 
 const (
@@ -47,9 +45,7 @@ type delegatedTranslator struct {
 }
 
 func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
-	_ = stats.RecordWithOptions(context.Background(),
-		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
-		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
+	metrics.HttpDelegatedRoutingMethod.WithLabelValues(r.Method).Inc()
 
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
@@ -67,9 +63,7 @@ func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
 }
 
 func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encrypted bool) {
-	_ = stats.RecordWithOptions(context.Background(),
-		stats.WithTags(tag.Insert(metrics.Method, r.Method)),
-		stats.WithMeasurements(metrics.HttpDelegatedRoutingMethod.M(1)))
+	metrics.HttpDelegatedRoutingMethod.WithLabelValues(r.Method).Inc()
 
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")

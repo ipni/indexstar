@@ -17,8 +17,6 @@ import (
 	"github.com/ipni/indexstar/metrics"
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multihash"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
 )
 
 const (
@@ -206,16 +204,6 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 
 func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.URL, encrypted bool) (int, []byte) {
 	start := time.Now()
-	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
-	loadTags := []tag.Mutator{tag.Insert(metrics.Method, source)}
-	defer func() {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(latencyTags...),
-			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(loadTags...),
-			stats.WithMeasurements(metrics.FindLoad.M(1)))
-	}()
 
 	// sgResponse is a struct that exists to capture the backend that the response has been received from
 	type sgResponse struct {
@@ -262,25 +250,54 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 
 		log.Debugw("sending json request", "url", req.URL.String())
 
-		resp, err := s.Client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Backend query ended", "err", err)
-				return nil, err
-			} else {
-				log.Warnw("Failed to query backend", "err", err)
-				return &sgResponse{err: err}, nil
-			}
+		start := time.Now()
+		backendMetrics := func(entriesCount int, errKind metrics.ErrKind) {
+			metrics.ReportFindBackendMetrics(
+				b.URL().Host,
+				source,
+				false,
+				errKind,
+				time.Since(start),
+				entriesCount,
+				0,
+			)
 		}
-		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
 
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Reading backend response ended", "err", err)
-			} else {
-				log.Warnw("Failed to read backend response", "err", err)
-			}
+		resp, err := s.Client.Do(req)
+		switch {
+		case errors.Is(err, context.Canceled):
+			backendMetrics(0, metrics.ErrKindRequestCanceled)
+			log.Debugw("Backend query canceled", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			backendMetrics(0, metrics.ErrKindRequestDeadline)
+			log.Debugw("Backend query deadline exceeded", "err", err)
+			return nil, err
+
+		case err != nil:
+			backendMetrics(0, metrics.ErrKindRequestFailed)
+			log.Warnw("Failed to query backend", "err", err)
+			return &sgResponse{err: err}, nil
+		}
+
+		defer resp.Body.Close()
+
+		data, err := io.ReadAll(resp.Body)
+		switch {
+		case errors.Is(err, context.Canceled):
+			backendMetrics(0, metrics.ErrKindReadCanceled)
+			log.Debugw("Reading backend response ended", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			backendMetrics(0, metrics.ErrKindReadDeadline)
+			log.Debugw("Failed to read backend response", "err", err)
+			return nil, err
+
+		case err != nil:
+			backendMetrics(0, metrics.ErrKindReadFailed)
+			log.Warnw("Failed to read backend response", "err", err)
 			return nil, err
 		}
 
@@ -291,13 +308,25 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 			atomic.AddInt32(&count, 1)
 			providers, err := model.UnmarshalFindResponse(data)
 			if err != nil {
+				backendMetrics(0, metrics.ErrKindUnmarshalFailed)
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
+
+			entriesCount := 0
+			for _, mr := range providers.MultihashResults {
+				entriesCount += len(mr.ProviderResults)
+			}
+			backendMetrics(entriesCount, metrics.ErrKindNone)
+
 			return &sgResponse{bknd: b, rsp: providers}, nil
+
 		case http.StatusNotFound:
+			backendMetrics(0, metrics.ErrKindNotFound)
 			atomic.AddInt32(&count, 1)
 			return nil, nil
+
 		default:
+			backendMetrics(0, metrics.ErrKindHttpStatus(resp.StatusCode))
 			body := string(data)
 			log := log.With("status", resp.StatusCode, "body", body)
 			log.Warn("Request processing was not successful")
@@ -316,12 +345,19 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 	var resp model.FindResponse
 	var gatherErrs []error
 	var rs resultStats
-	var foundRegular, foundCaskade bool
+	var found, foundRegular, foundCaskade bool
+
 	updateFoundFlags := func(b Backend) {
 		_, isCaskade := b.(caskadeBackend)
 		foundCaskade = foundCaskade || isCaskade
 		foundRegular = foundRegular || !isCaskade
+		found = true
 	}
+
+	defer func() {
+		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
+		metrics.FindLoad.WithLabelValues(source).Inc()
+	}()
 
 outer:
 	for r := range sg.gather(ctx) {
@@ -367,28 +403,15 @@ outer:
 		}
 	}
 
-	_ = stats.RecordWithOptions(context.Background(),
-		stats.WithMeasurements(metrics.FindBackends.M(float64(atomic.LoadInt32(&count)))))
+	metrics.FindBackends.Set(float64(atomic.LoadInt32(&count)))
 
 	if len(resp.MultihashResults) == 0 && len(resp.EncryptedMultihashResults) == 0 {
 		if len(gatherErrs) != 0 {
 			log.Warnw("Failed to request from backend", "errs", gatherErrs)
 			return http.StatusGatewayTimeout, nil
 		}
-		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		return http.StatusNotFound, nil
 	}
-
-	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
-	yesno := func(yn bool) string {
-		if yn {
-			return "yes"
-		}
-		return "no"
-	}
-
-	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
-	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 
 	rs.observeFindResponse(&resp)
 	rs.reportMetrics(source)

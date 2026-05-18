@@ -20,8 +20,6 @@ import (
 	"github.com/mercari/go-circuitbreaker"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
 )
 
 type (
@@ -111,26 +109,28 @@ func (rs *resultStats) observeFindResponse(resp *model.FindResponse) {
 }
 
 func (rs *resultStats) reportMetrics(method string) {
-	mt := tag.Insert(metrics.Method, method)
 	if rs.bitswapTransportCount > 0 {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(mt, tag.Insert(metrics.Transport, multicodec.TransportBitswap.String())),
-			stats.WithMeasurements(metrics.FindResponse.M(rs.bitswapTransportCount)))
+		metrics.FindResponse.
+			WithLabelValues(method, multicodec.TransportBitswap.String()).
+			Add(float64(rs.bitswapTransportCount))
 	}
+
 	if rs.graphsyncTransportCount > 0 {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(mt, tag.Insert(metrics.Transport, multicodec.TransportGraphsyncFilecoinv1.String())),
-			stats.WithMeasurements(metrics.FindResponse.M(rs.graphsyncTransportCount)))
+		metrics.FindResponse.
+			WithLabelValues(method, multicodec.TransportGraphsyncFilecoinv1.String()).
+			Add(float64(rs.graphsyncTransportCount))
 	}
+
 	if rs.unknwonTransportCount > 0 {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(mt, tag.Insert(metrics.Transport, "unknown")),
-			stats.WithMeasurements(metrics.FindResponse.M(rs.unknwonTransportCount)))
+		metrics.FindResponse.
+			WithLabelValues(method, "unknown").
+			Add(float64(rs.unknwonTransportCount))
 	}
+
 	if rs.encCount > 0 {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(mt, tag.Insert(metrics.Transport, "encrypted")),
-			stats.WithMeasurements(metrics.FindResponse.M(rs.encCount)))
+		metrics.FindResponse.
+			WithLabelValues(method, "encrypted").
+			Add(float64(rs.encCount))
 	}
 }
 
@@ -144,6 +144,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 	maxWait time.Duration,
 	encrypted bool,
 	reqURL *url.URL,
+	method string,
 ) (
 	chan *resultWithBackend,
 	error,
@@ -185,13 +186,37 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 		log.Debugw("sending ndjson request", "url", req.URL.String())
 
+		validBackendEntriesCount := 0
+		malformedBackendEntriesCount := 0
+
+		start := time.Now()
+		measureBackendLatency := func(errKind metrics.ErrKind) {
+			metrics.ReportFindBackendMetrics(
+				b.URL().Host,
+				method,
+				false,
+				errKind,
+				time.Since(start),
+				validBackendEntriesCount,
+				malformedBackendEntriesCount,
+			)
+		}
+
 		resp, err := s.Client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				log.Debugw("Backend query ended", "err", err)
-			} else {
-				log.Warnw("Failed to query backend", "err", err)
-			}
+		switch {
+		case errors.Is(err, context.Canceled):
+			measureBackendLatency(metrics.ErrKindRequestCanceled)
+			log.Debugw("Backend query ended", "err", err)
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded):
+			measureBackendLatency(metrics.ErrKindRequestDeadline)
+			log.Debugw("Backend query timed out", "err", err)
+			return nil, err
+
+		case err != nil:
+			measureBackendLatency(metrics.ErrKindRequestFailed)
+			log.Warnw("Failed to query backend", "err", err)
 			return nil, err
 		}
 		defer resp.Body.Close()
@@ -199,12 +224,16 @@ func (s *server) fetchUpstreamNDJsonResponses(
 		switch resp.StatusCode {
 		case http.StatusOK:
 			backendsCount.Add(1)
+
 		case http.StatusNotFound:
+			measureBackendLatency(metrics.ErrKindNotFound)
 			io.Copy(io.Discard, resp.Body)
 			backendsCount.Add(1)
 			log.Debugw("not found response", "url", req.URL.String())
 			return nil, nil
+
 		default:
+			measureBackendLatency(metrics.ErrKindHttpStatus(resp.StatusCode))
 			bb, _ := io.ReadAll(resp.Body)
 			body := string(bb)
 			log.Warnw(
@@ -235,6 +264,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 					providersCount++
 					if err := json.Unmarshal(line, &result); err != nil {
+						measureBackendLatency(metrics.ErrKindUnmarshalFailed)
 						log.Debugw(
 							"failed to unmarshal backend response line",
 							"line", string(line),
@@ -246,6 +276,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 					// Sanity check the results in case backends don't respect accept media types;
 					// see: https://github.com/ipni/storetheindex/issues/1209
 					if len(result.EncryptedValueKey) == 0 && (result.Provider == nil || result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
+						malformedBackendEntriesCount++
 						log.Debugw(
 							"skipping malformed result",
 							"line", string(line),
@@ -254,6 +285,8 @@ func (s *server) fetchUpstreamNDJsonResponses(
 						)
 						continue
 					}
+
+					validBackendEntriesCount++
 
 					select {
 					case <-cctx.Done():
@@ -264,14 +297,21 @@ func (s *server) fetchUpstreamNDJsonResponses(
 					continue
 				}
 				if err := scanner.Err(); err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						log.Debugw("Reading backend response ended", "err", err)
-					} else {
+					switch {
+					case errors.Is(err, context.Canceled):
+						measureBackendLatency(metrics.ErrKindReadCanceled)
+						log.Debugw("Reading backend response cancelled", "err", err)
+					case errors.Is(err, context.DeadlineExceeded):
+						measureBackendLatency(metrics.ErrKindReadDeadline)
+						log.Debugw("Reading backend response timed out", "err", err)
+					default:
+						measureBackendLatency(metrics.ErrKindReadFailed)
 						log.Warnw("Failed to read backend response", "err", err)
 					}
-
 					return nil, circuitbreaker.MarkAsSuccess(err)
 				}
+
+				measureBackendLatency(metrics.ErrKindNone)
 				log.Debugw(
 					"Finished processing results from backend",
 					"providersCount", providersCount,
@@ -291,8 +331,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 		close(resultsChan)
 
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithMeasurements(metrics.FindBackends.M(float64(backendsCount.Load()))))
+		metrics.FindBackends.Set(float64(backendsCount.Load()))
 
 		log.Debugw(
 			"Completed processing find results",
@@ -304,51 +343,58 @@ func (s *server) fetchUpstreamNDJsonResponses(
 	return resultsChan, nil
 }
 
-func (s *server) doFindNDJson(ctx context.Context, w http.ResponseWriter, method string, reqURL *url.URL, translateNonStreaming bool, mh multihash.Multihash, encrypted bool) {
+func (s *server) doFindNDJson(
+	ctx context.Context,
+	w http.ResponseWriter,
+	method string,
+	reqURL *url.URL,
+	translateToNonStreaming bool,
+	mh multihash.Multihash,
+	encrypted bool,
+) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var maxWait time.Duration
-	if translateNonStreaming {
+	if translateToNonStreaming {
 		maxWait = config.Server.ResultMaxWait
 	} else {
 		maxWait = config.Server.ResultStreamMaxWait
 	}
 
 	start := time.Now()
-	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
-	loadTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
-	defer func() {
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(latencyTags...),
-			stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
-		_ = stats.RecordWithOptions(context.Background(),
-			stats.WithTags(loadTags...),
-			stats.WithMeasurements(metrics.FindLoad.M(1)))
-	}()
 
-	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL)
+	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL, method)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
-	var provResults []model.ProviderResult
-	var encValKeys [][]byte
-	if translateNonStreaming {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if translateToNonStreaming {
 		w.Header().Set("Content-Type", mediaTypeJson)
 	} else {
 		w.Header().Set("Content-Type", mediaTypeNDJson)
-		w.Header().Set("Connection", "Keep-Alive")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
 
 	flusher, flushable := w.(http.Flusher)
 	encoder := json.NewEncoder(w)
 	results := newResultSet()
 
+	var provResults []model.ProviderResult
+	var encValKeys [][]byte
 	var rs resultStats
-	var foundCaskade, foundRegular bool
+	var found, foundCaskade, foundRegular bool
+
+	defer func() {
+		if found {
+			rs.reportMetrics(method)
+		}
+
+		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
+		metrics.FindLoad.WithLabelValues(method).Inc()
+	}()
+
 LOOP:
 	for {
 		select {
@@ -369,8 +415,9 @@ LOOP:
 			_, isCaskade := rwb.bknd.(caskadeBackend)
 			foundCaskade = foundCaskade || isCaskade
 			foundRegular = foundRegular || !isCaskade
+			found = true
 
-			if translateNonStreaming {
+			if translateToNonStreaming {
 				if len(result.EncryptedValueKey) > 0 {
 					encValKeys = append(encValKeys, result.EncryptedValueKey)
 				} else {
@@ -391,14 +438,11 @@ LOOP:
 	}
 
 	if len(results) == 0 {
-		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
 
-	rs.reportMetrics(method)
-
-	if translateNonStreaming {
+	if translateToNonStreaming {
 		var resp model.FindResponse
 		if len(provResults) > 0 {
 			resp.MultihashResults = []model.MultihashResult{
@@ -420,26 +464,14 @@ LOOP:
 			log.Errorw("Failed to encode translated non streaming response", "err", err)
 		}
 	}
-	latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
-	yesno := func(yn bool) string {
-		if yn {
-			return "yes"
-		}
-		return "no"
-	}
-
-	latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
-	latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 }
 
 func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url.URL, encrypted bool) (int, chan model.ProviderResult) {
 	maxWait := config.Server.ResultStreamMaxWait
 
 	start := time.Now()
-	latencyTags := []tag.Mutator{tag.Insert(metrics.Method, http.MethodGet)}
-	loadTags := []tag.Mutator{tag.Insert(metrics.Method, method)}
 
-	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL)
+	resultsChan, err := s.fetchUpstreamNDJsonResponses(ctx, maxWait, encrypted, reqURL, method)
 	if err != nil {
 		return http.StatusInternalServerError, nil
 	}
@@ -447,32 +479,34 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 	out := make(chan model.ProviderResult)
 
 	go func() {
+		found, foundCaskade, foundRegular := false, false, false
+		rs := resultStats{}
+		results := newResultSet()
+
 		defer func() {
 			close(out)
 
-			_ = stats.RecordWithOptions(context.Background(),
-				stats.WithTags(latencyTags...),
-				stats.WithMeasurements(metrics.FindLatency.M(float64(time.Since(start).Milliseconds()))))
-			_ = stats.RecordWithOptions(context.Background(),
-				stats.WithTags(loadTags...),
-				stats.WithMeasurements(metrics.FindLoad.M(1)))
+			if found {
+				rs.reportMetrics(method)
+			}
+
+			metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
+			metrics.FindLoad.WithLabelValues(method).Inc()
 		}()
 
-		results := newResultSet()
-		var rs resultStats
-		var foundCaskade, foundRegular bool
-	LOOP:
 		for {
 			select {
 			case <-ctx.Done():
-				break LOOP
+				return
+
 			case rwb, ok := <-resultsChan:
 				if !ok {
-					break LOOP
+					return
 				}
+
 				result := rwb.rslt
-				absent := results.putIfAbsent(result)
-				if !absent {
+
+				if !results.putIfAbsent(result) {
 					continue
 				}
 
@@ -481,28 +515,11 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 				_, isCaskade := rwb.bknd.(caskadeBackend)
 				foundCaskade = foundCaskade || isCaskade
 				foundRegular = foundRegular || !isCaskade
+				found = true
 
 				out <- result.ProviderResult
 			}
 		}
-
-		if len(results) == 0 {
-			latencyTags = append(latencyTags, tag.Insert(metrics.Found, "no"))
-			return
-		}
-
-		rs.reportMetrics(method)
-
-		latencyTags = append(latencyTags, tag.Insert(metrics.Found, "yes"))
-		yesno := func(yn bool) string {
-			if yn {
-				return "yes"
-			}
-			return "no"
-		}
-
-		latencyTags = append(latencyTags, tag.Insert(metrics.FoundCaskade, yesno(foundCaskade)))
-		latencyTags = append(latencyTags, tag.Insert(metrics.FoundRegular, yesno(foundRegular)))
 	}()
 
 	return 200, out
