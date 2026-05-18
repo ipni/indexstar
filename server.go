@@ -34,6 +34,12 @@ const (
 	providersBackendsArg = "providersBackends"
 )
 
+type serverInterface interface {
+	Serve() <-chan error
+	Reload(c *cli.Context) error
+	GetCfgBase() string
+}
+
 type server struct {
 	context.Context
 	http.Client
@@ -62,7 +68,7 @@ type providersBackend struct {
 	Backend
 }
 
-func NewServer(c *cli.Context) (*server, error) {
+func NewServer(c *cli.Context) (serverInterface, error) {
 	var lc net.ListenConfig
 
 	bound, err := lc.Listen(c.Context, "tcp", c.String("listen"))
@@ -283,7 +289,7 @@ func (s *server) updateTopProviders() {
 	}
 }
 
-func (s *server) Serve() chan error {
+func (s *server) Serve() <-chan error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, false) })
 	mux.HandleFunc("/encrypted/cid/", func(w http.ResponseWriter, r *http.Request) { s.findCid(w, r, true) })
@@ -388,4 +394,8 @@ func writeJsonResponse(w http.ResponseWriter, status int, body []byte) {
 		log.Errorw("cannot write response", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
 	}
+}
+
+func (s *server) GetCfgBase() string {
+	return s.cfgBase
 }

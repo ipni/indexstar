@@ -34,7 +34,7 @@ type serverTestSuite struct {
 
 	srv        *server
 	srvCancel  context.CancelFunc
-	srvErrChan chan error
+	srvErrChan <-chan error
 }
 
 func TestServerTestSuite(t *testing.T) {
