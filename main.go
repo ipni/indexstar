@@ -68,6 +68,9 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
+			ctx, ctxCancel := context.WithCancel(c.Context)
+			defer ctxCancel()
+			c.Context = ctx
 
 			s, err := NewServer(c)
 			if err != nil {
@@ -109,7 +112,17 @@ func main() {
 			for {
 				select {
 				case err := <-done:
-					return err
+					// Ensure we've started the shutdown sequence
+					ctxCancel()
+
+					// All errors must be collected to ensure the shutdown sequence is complete
+					allErrs := []error{err}
+					for err = range done {
+						allErrs = append(allErrs, err)
+					}
+
+					return errors.Join(allErrs...)
+
 				case <-timeChan:
 					// Detect config file changes and reload config if needed.
 					var changed bool
