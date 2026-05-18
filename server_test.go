@@ -73,10 +73,10 @@ func (s *serverTestSuite) SetupTest() {
 	s.srvCancel = cancel
 
 	s.srv = &server{
-		Context:               ctx,
-		Client:                *http.DefaultClient,
+		ctx:                   ctx,
+		httpClient:            *http.DefaultClient,
 		cfgBase:               "",
-		Listener:              s.srvListener,
+		listener:              s.srvListener,
 		metricsListener:       s.metricsListener,
 		backends:              []Backend{be},
 		translateNonStreaming: false,

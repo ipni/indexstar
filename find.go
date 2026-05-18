@@ -109,7 +109,7 @@ func (s *server) findMetadataSubtree(w http.ResponseWriter, r *http.Request) {
 		if !b.Matches(req) {
 			return nil, nil
 		}
-		resp, err := s.Client.Do(req)
+		resp, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warnw("Failed to query backend for metadata", "err", err)
 			return nil, err
@@ -263,7 +263,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 			)
 		}
 
-		resp, err := s.Client.Do(req)
+		resp, err := s.httpClient.Do(req)
 		switch {
 		case errors.Is(err, context.Canceled):
 			backendMetrics(0, metrics.ErrKindRequestCanceled)

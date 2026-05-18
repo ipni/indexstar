@@ -202,7 +202,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			)
 		}
 
-		resp, err := s.Client.Do(req)
+		resp, err := s.httpClient.Do(req)
 		switch {
 		case errors.Is(err, context.Canceled):
 			measureBackendLatency(metrics.ErrKindRequestCanceled)

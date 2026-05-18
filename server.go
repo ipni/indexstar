@@ -39,9 +39,9 @@ type serverInterface interface {
 }
 
 type server struct {
-	context.Context
-	http.Client
-	net.Listener
+	ctx                   context.Context
+	httpClient            http.Client
+	listener              net.Listener
 	metricsListener       net.Listener
 	cfgBase               string
 	backends              []Backend
@@ -163,10 +163,10 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	compileTime := time.Now()
 
 	s := server{
-		Context:               c.Context,
-		Client:                httpClient,
+		ctx:                   c.Context,
+		httpClient:            httpClient,
 		cfgBase:               c.String("config"),
-		Listener:              bound,
+		listener:              bound,
 		metricsListener:       mb,
 		backends:              backends,
 		translateNonStreaming: c.Bool("translateNonStreaming"),
@@ -332,9 +332,9 @@ func (s *server) Serve() <-chan error {
 		Handler: http.MaxBytesHandler(mux, config.Server.MaxRequestBodySize),
 	}
 	go func() {
-		log.Infow("finder http server listening", "listen_addr", s.Listener.Addr())
-		e := serv.Serve(s.Listener)
-		if s.Context.Err() == nil {
+		log.Infow("finder http server listening", "listen_addr", s.listener.Addr())
+		e := serv.Serve(s.listener)
+		if s.ctx.Err() == nil {
 			ec <- e
 		}
 	}()
@@ -348,7 +348,7 @@ func (s *server) Serve() <-chan error {
 	go func() {
 		log.Infow("metrics server listening", "listen_addr", s.metricsListener.Addr())
 		e := metricsServ.Serve(s.metricsListener)
-		if s.Context.Err() == nil {
+		if s.ctx.Err() == nil {
 			ec <- e
 		}
 	}()
@@ -356,7 +356,7 @@ func (s *server) Serve() <-chan error {
 	go func() {
 		defer close(ec)
 
-		<-s.Context.Done()
+		<-s.ctx.Done()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.ShutdownTimeout)
 		defer cancel()
