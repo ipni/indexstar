@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,9 @@ import (
 const configCheckInterval = 5 * time.Second
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	app := &cli.App{
 		Name:  "indexstar",
 		Usage: "indexstar is a point in the content routing galaxy - routes requests in a star topology",
@@ -64,8 +68,6 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			exit := make(chan os.Signal, 1)
-			signal.Notify(exit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 			s, err := NewServer(c)
 			if err != nil {
@@ -112,8 +114,6 @@ func main() {
 					case reloadSig <- struct{}{}:
 					default:
 					}
-				case <-exit:
-					return nil
 				case err := <-done:
 					return err
 				case <-reloadSig:
@@ -138,11 +138,12 @@ func main() {
 			}
 		},
 	}
-	err := app.Run(os.Args)
+	err := app.RunContext(ctx, os.Args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
 	os.Exit(0)
 }
 
