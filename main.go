@@ -74,8 +74,8 @@ func main() {
 				return err
 			}
 
-			sighup := make(chan os.Signal, 1)
-			signal.Notify(sighup, syscall.SIGHUP)
+			reloadSig := make(chan os.Signal, 1)
+			signal.Notify(reloadSig, syscall.SIGHUP)
 
 			done := s.Serve()
 
@@ -106,22 +106,12 @@ func main() {
 				}
 			}
 
-			reloadSig := make(chan struct{}, 1)
 			for {
 				select {
-				case <-sighup:
-					select {
-					case reloadSig <- struct{}{}:
-					default:
-					}
 				case err := <-done:
 					return err
-				case <-reloadSig:
-					err := s.Reload(c)
-					if err != nil {
-						log.Warnf("couldn't reload servers: %s", err)
-					}
 				case <-timeChan:
+					// Detect config file changes and reload config if needed.
 					var changed bool
 					modTime, changed, err = fileChanged(s.cfgBase, modTime)
 					if err != nil {
@@ -132,7 +122,16 @@ func main() {
 						continue
 					}
 					if changed {
-						reloadSig <- struct{}{}
+						select {
+						case reloadSig <- syscall.SIGHUP:
+						default:
+						}
+					}
+
+				case <-reloadSig:
+					err := s.Reload(c)
+					if err != nil {
+						log.Warnf("couldn't reload servers: %s", err)
 					}
 				}
 			}
