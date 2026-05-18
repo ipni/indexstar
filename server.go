@@ -63,14 +63,28 @@ type providersBackend struct {
 }
 
 func NewServer(c *cli.Context) (*server, error) {
-	bound, err := net.Listen("tcp", c.String("listen"))
+	var lc net.ListenConfig
+
+	bound, err := lc.Listen(c.Context, "tcp", c.String("listen"))
 	if err != nil {
 		return nil, err
 	}
-	mb, err := net.Listen("tcp", c.String("metrics"))
+	defer func() {
+		if bound != nil {
+			bound.Close()
+		}
+	}()
+
+	mb, err := lc.Listen(c.Context, "tcp", c.String("metrics"))
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if mb != nil {
+			mb.Close()
+		}
+	}()
+
 	servers := c.StringSlice(backendsArg)
 	cascadeServers := c.StringSlice(cascadeBackendsArg)
 	dhServers := c.StringSlice(dhBackendsArg)
@@ -157,6 +171,9 @@ func NewServer(c *cli.Context) (*server, error) {
 		pcache:                pc,
 		pcounts:               pCounts,
 	}
+
+	// Listeners propagated to the server, don't close on defer
+	bound, mb = nil, nil
 
 	go func() {
 		for {
