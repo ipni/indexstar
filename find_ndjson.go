@@ -194,7 +194,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			metrics.ReportFindBackendMetrics(
 				b.URL().Host,
 				method,
-				false,
+				true,
 				errKind,
 				time.Since(start),
 				validBackendEntriesCount,
