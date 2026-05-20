@@ -21,6 +21,7 @@ const (
 	defaultServerResultStreamMaxWait        = 20 * time.Second
 	defaultServerMaxRequestBodySize  int64  = 8 << 10 // 8KiB
 	defaultServerCascadeLabels       string = ""      // 8KiB
+	defaultServerShutdownTimeout            = 40 * time.Second
 
 	defaultCircuitHalfOpenSuccesses = 10
 	defaultCircuitOpenTimeout       = 0
@@ -56,6 +57,7 @@ var config struct {
 		ResultStreamMaxWait       time.Duration
 		MaxRequestBodySize        int64
 		CascadeLabels             string
+		ShutdownTimeout           time.Duration
 		TopProviderCardinality    int
 		TopProviderReportInterval time.Duration
 	}
@@ -83,6 +85,7 @@ func init() {
 	config.Server.ResultStreamMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_STREAM_MAX_WAIT", defaultServerResultStreamMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)
 	config.Server.CascadeLabels = getEnvOrDefault[string]("SERVER_CASCADE_LABELS", defaultServerCascadeLabels)
+	config.Server.ShutdownTimeout = getEnvOrDefault[time.Duration]("SERVER_SHUTDOWN_TIMEOUT", defaultServerShutdownTimeout)
 
 	config.Server.TopProviderCardinality = getEnvOrDefault[int]("SERVER_TOP_PROVIDER_CARDINALITY", defaultStatMaxProviders)
 	config.Server.TopProviderReportInterval = getEnvOrDefault[time.Duration]("SERVER_TOP_PROVIDER_REPORT_INVERVAL", defaultStatProviderReportUpdate)

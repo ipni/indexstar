@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,29 @@ import (
 const configCheckInterval = 5 * time.Second
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	reloadSig := make(chan os.Signal, 1)
+	signal.Notify(reloadSig, syscall.SIGHUP)
+	defer signal.Stop(reloadSig)
+
+	err := runApp(ctx, os.Args, reloadSig, configCheckInterval, NewServer)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(0)
+}
+
+func runApp(
+	ctx context.Context,
+	args []string,
+	reloadSig chan os.Signal,
+	configCheckInterval time.Duration,
+	newServer func(c *cli.Context) (serverInterface, error),
+) error {
 	app := &cli.App{
 		Name:  "indexstar",
 		Usage: "indexstar is a point in the content routing galaxy - routes requests in a star topology",
@@ -64,16 +88,14 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			exit := make(chan os.Signal, 1)
-			signal.Notify(exit, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+			ctx, ctxCancel := context.WithCancel(c.Context)
+			defer ctxCancel()
+			c.Context = ctx
 
-			s, err := NewServer(c)
+			s, err := newServer(c)
 			if err != nil {
 				return err
 			}
-
-			sighup := make(chan os.Signal, 1)
-			signal.Notify(sighup, syscall.SIGHUP)
 
 			done := s.Serve()
 
@@ -84,7 +106,7 @@ func main() {
 				timeChan <-chan time.Time
 			)
 			if configCheckInterval != 0 {
-				cfgPath = s.cfgBase
+				cfgPath = s.GetCfgBase()
 				if cfgPath == "" {
 					cfgPath, err = Path("", "")
 					if err != nil {
@@ -104,46 +126,49 @@ func main() {
 				}
 			}
 
-			reloadSig := make(chan struct{}, 1)
 			for {
 				select {
-				case <-sighup:
-					select {
-					case reloadSig <- struct{}{}:
-					default:
-					}
-				case <-exit:
-					return nil
 				case err := <-done:
-					return err
+					// Ensure we've started the shutdown sequence
+					ctxCancel()
+
+					// All errors must be collected to ensure the shutdown sequence is complete
+					allErrs := []error{err}
+					for err = range done {
+						allErrs = append(allErrs, err)
+					}
+
+					return errors.Join(allErrs...)
+
+				case <-timeChan:
+					// Detect config file changes and reload config if needed.
+					var changed bool
+					modTime, changed, err = fileChanged(s.GetCfgBase(), modTime)
+					if err != nil {
+						log.Errorw("Cannot stat config file", "err", err, "path", cfgPath)
+						ticker.Stop()
+						ticker = nil
+						timeChan = nil // disable timeChan from the select statement
+						continue
+					}
+					if changed {
+						select {
+						case reloadSig <- syscall.SIGHUP:
+						default:
+						}
+					}
+
 				case <-reloadSig:
 					err := s.Reload(c)
 					if err != nil {
 						log.Warnf("couldn't reload servers: %s", err)
 					}
-				case <-timeChan:
-					var changed bool
-					modTime, changed, err = fileChanged(s.cfgBase, modTime)
-					if err != nil {
-						log.Errorw("Cannot stat config file", "err", err, "path", cfgPath)
-						ticker.Stop()
-						ticker = nil
-						timeChan = nil // reading from nil channel blocks forever
-						continue
-					}
-					if changed {
-						reloadSig <- struct{}{}
-					}
 				}
 			}
 		},
 	}
-	err := app.Run(os.Args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	err := app.RunContext(ctx, args)
+	return err
 }
 
 func fileChanged(filePath string, modTime time.Time) (time.Time, bool, error) {
