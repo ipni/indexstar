@@ -61,7 +61,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "indexstar_find_latency_seconds",
 			Help:    "Time to respond to a find request",
-			Buckets: prometheus.DefBuckets,
+			Buckets: responseLatencyBuckets,
 		},
 		[]string{LabelMethod, LabelFound, LabelFoundCaskade, LabelFoundRegular},
 	)
