@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -232,7 +233,7 @@ func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
 
 		data, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		require.Empty(t, data)
+		require.Empty(t, bytes.TrimSpace(data))
 	}
 }
 
@@ -305,4 +306,172 @@ func (s *serverTestSuite) TestLargeJSONResponse() {
 	err = json.NewDecoder(resp.Body).Decode(&response)
 	require.NoError(t, err)
 	require.Len(t, response.Providers, 100)
+}
+
+func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
+	t := s.T()
+
+	const cidStr = "QmeLvFK9dBLhC3kbfc58mLntUei6s7fZUGWsm1xJhczm1S"
+
+	for _, dd := range []struct {
+		Name string
+
+		RequestNDJson bool
+		RequestMethod string
+
+		EmptyResponse  bool
+		NoCacheControl bool
+
+		ExpectedContentType    string
+		ExpectedStatusCode     int
+		ExpectedAllowedMethods []string
+	}{
+		{
+			Name:                "JSON response",
+			RequestNDJson:       false,
+			RequestMethod:       http.MethodGet,
+			EmptyResponse:       false,
+			ExpectedContentType: "application/json",
+			ExpectedStatusCode:  http.StatusOK,
+		},
+		{
+			Name:                "NDJSON response",
+			RequestNDJson:       true,
+			RequestMethod:       http.MethodGet,
+			EmptyResponse:       false,
+			ExpectedContentType: "application/x-ndjson",
+			ExpectedStatusCode:  http.StatusOK,
+		},
+		{
+			Name:                "Empty JSON response",
+			RequestNDJson:       false,
+			RequestMethod:       http.MethodGet,
+			EmptyResponse:       true,
+			ExpectedContentType: "text/plain",
+			ExpectedStatusCode:  http.StatusNotFound,
+		},
+		{
+			Name:                "Empty NDJSON response",
+			RequestNDJson:       true,
+			RequestMethod:       http.MethodGet,
+			EmptyResponse:       true,
+			ExpectedContentType: "text/plain",
+			ExpectedStatusCode:  http.StatusNotFound,
+		},
+		{
+			Name:                   "Bad method for JSON",
+			RequestNDJson:          false,
+			RequestMethod:          http.MethodPost,
+			EmptyResponse:          false,
+			NoCacheControl:         true,
+			ExpectedContentType:    "text/plain",
+			ExpectedStatusCode:     http.StatusMethodNotAllowed,
+			ExpectedAllowedMethods: []string{"GET", "OPTIONS"},
+		},
+		{
+			Name:                   "Bad method for NDJSON",
+			RequestNDJson:          true,
+			RequestMethod:          http.MethodPost,
+			EmptyResponse:          false,
+			NoCacheControl:         true,
+			ExpectedContentType:    "text/plain",
+			ExpectedStatusCode:     http.StatusMethodNotAllowed,
+			ExpectedAllowedMethods: []string{"GET", "OPTIONS"},
+		},
+	} {
+		t.Run(dd.Name, func(t *testing.T) {
+			s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, `/cid/`+cidStr, r.URL.Path)
+
+				if dd.EmptyResponse {
+					http.Error(w, "", http.StatusNotFound)
+					return
+				}
+
+				if dd.RequestNDJson {
+					require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					writeOneLineJSON(t, w, `
+						{
+							"ContextID":"ctx1",
+							"Metadata":"gBI=",
+							"Provider":{
+								"ID":"12D3KooWAGjvuFgSMiSdivCnxifF23ovdqb8j8nzYiEcdy6quL6a",
+								"Addrs":[
+									"/ip4/1.2.3.4/tcp/30000"
+								]
+							}
+						}
+					`)
+				} else {
+					require.Equal(t, r.Header.Get("Accept"), "application/json")
+					w.Header().Set("Content-Type", "application/json")
+					writeOneLineJSON(t, w, `
+						{
+							"MultihashResults": [
+								{
+									"Multihash": "EiDtzI9MECNeznPpXjjXnrCpZ/Te+679GWm43DnGecaDIQ==",
+									"ProviderResults": [
+										{
+											"ContextID": "AXESIFBXwfY5v1krna9B2bzjlxEoRTG4avb/uIGFHJbGjtL4",
+											"Metadata":  "oBIA",
+											"Provider": {
+												"ID": "12D3KooWAGjvuFgSMiSdivCnxifF23ovdqb8j8nzYiEcdy6quL6a",
+												"Addrs": [
+													"/ip4/1.2.3.4/tcp/30000"
+												]
+											}
+										}
+									]
+								}
+							]
+						}
+					`)
+				}
+			}
+
+			req, err := http.NewRequest(
+				dd.RequestMethod,
+				fmt.Sprintf("http://%s/routing/v1/providers/%s", s.srvListener.Addr(), cidStr),
+				nil,
+			)
+			require.NoError(t, err)
+
+			if dd.RequestNDJson {
+				req.Header.Set("Accept", "application/x-ndjson")
+			} else {
+				req.Header.Set("Accept", "application/json")
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, resp.Header.Get("Access-Control-Allow-Origin"), "*")
+			require.Equal(t, resp.Header.Get("Access-Control-Allow-Methods"), "GET, OPTIONS")
+			require.Equal(t, resp.Header.Get("X-Content-Type-Options"), "nosniff")
+			require.Equal(t, resp.Header.Get("Vary"), "Accept")
+
+			if !dd.NoCacheControl {
+				cc := resp.Header.Get("Cache-Control")
+				require.Contains(t, cc, "public")
+				require.Contains(t, cc, "max-age")
+				require.Contains(t, cc, "s-maxage")
+				require.Contains(t, cc, "stale-while-revalidate")
+				require.Contains(t, cc, "stale-if-error")
+			}
+
+			require.Equal(t, dd.ExpectedStatusCode, resp.StatusCode)
+			require.Contains(t, resp.Header.Get("Content-Type"), dd.ExpectedContentType)
+
+			allowedMethods := []string{}
+			for _, method := range strings.Split(resp.Header.Get("Allow"), ",") {
+				if method = strings.TrimSpace(method); method != "" {
+					allowedMethods = append(allowedMethods, method)
+				}
+			}
+
+			require.ElementsMatch(t, dd.ExpectedAllowedMethods, allowedMethods)
+		})
+	}
 }

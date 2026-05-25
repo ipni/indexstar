@@ -26,10 +26,17 @@ const (
 type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
 type findStreamFunc func(ctx context.Context, method string, req *url.URL, encrypted bool) (int, chan model.ProviderResult)
 
-func NewDelegatedTranslator(backend findFunc, streamingBackend findStreamFunc) (http.Handler, error) {
+func NewDelegatedTranslator(
+	backend findFunc,
+	streamingBackend findStreamFunc,
+	cacheControlSuccessHeader string,
+	cacheControlNotFoundHeader string,
+) (http.Handler, error) {
 	finder := delegatedTranslator{
-		be:  backend,
-		sbe: streamingBackend,
+		be:                         backend,
+		sbe:                        streamingBackend,
+		cacheControlSuccessHeader:  cacheControlSuccessHeader,
+		cacheControlNotFoundHeader: cacheControlNotFoundHeader,
 	}
 	m := http.NewServeMux()
 	m.HandleFunc("/providers", finder.provide)
@@ -42,6 +49,9 @@ func NewDelegatedTranslator(backend findFunc, streamingBackend findStreamFunc) (
 type delegatedTranslator struct {
 	be  findFunc
 	sbe findStreamFunc
+
+	cacheControlSuccessHeader  string
+	cacheControlNotFoundHeader string
 }
 
 func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
@@ -68,13 +78,19 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	h := w.Header()
 	h.Add("Access-Control-Allow-Origin", "*")
 	h.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+	h.Add("X-Content-Type-Options", "nosniff")
+	h.Add("Vary", "Accept")
+
 	switch r.Method {
 	case http.MethodGet:
+		// continue with the request
+
 	case http.MethodOptions:
 		w.WriteHeader(http.StatusOK)
 		return
+
 	default:
-		w.Header().Set("Allow", http.MethodGet)
+		h.Add("Allow", http.MethodGet+", "+http.MethodOptions)
 		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
@@ -99,49 +115,58 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 
 	switch {
 	case acc.ndjson:
-		rcode, respChan := dt.sbe(r.Context(), findMethodDelegated, uri, encrypted)
-		if rcode != http.StatusOK {
-			http.Error(w, "", rcode)
-			return
-		}
+		dt.findNDJSon(r, uri, encrypted, w, flt)
 
-		out := &drResp{}
-		hasWritten := false
-		encoder := json.NewEncoder(w)
-
-		for rcrd := range respChan {
-			prov := drProvFromResult(rcrd)
-
-			if !flt.apply(prov) {
-				// provider does not pass the filters, skip it.
-				continue
-			}
-
-			// if new
-			if out.append(prov) {
-				if !hasWritten {
-					w.Header().Set("Content-Type", mediaTypeNDJson)
-					w.Header().Set("Connection", "Keep-Alive")
-					w.Header().Set("X-Content-Type-Options", "nosniff")
-					w.WriteHeader(200)
-					hasWritten = true
-				}
-
-				if err := encoder.Encode(prov); err != nil {
-					return
-				}
-			}
-		}
-		if len(out.seenProviders) == 0 {
-			// no response.
-			w.WriteHeader(http.StatusNotFound)
-		}
-		return
 	default:
+		dt.findJSON(r, uri, encrypted, w, flt)
+	}
+}
+
+func (dt *delegatedTranslator) findNDJSon(r *http.Request, uri *url.URL, encrypted bool, w http.ResponseWriter, flt *filters) {
+	rcode, respChan := dt.sbe(r.Context(), findMethodDelegated, uri, encrypted)
+	if rcode != http.StatusOK {
+		http.Error(w, "", rcode)
+		return
 	}
 
+	w.Header().Set("Content-Type", mediaTypeNDJson)
+	w.Header().Set("Cache-Control", dt.cacheControlSuccessHeader)
+
+	out := &drResp{}
+	encoder := json.NewEncoder(w)
+
+	for rcrd := range respChan {
+		prov := drProvFromResult(rcrd)
+
+		if !flt.apply(prov) {
+			// provider does not pass the filters, skip it.
+			continue
+		}
+
+		if !out.append(prov) {
+			// duplicate provider, skip it.
+			continue
+		}
+
+		if err := encoder.Encode(prov); err != nil {
+			return
+		}
+	}
+
+	if len(out.seenProviders) == 0 {
+		// no response.
+		w.Header().Set("Cache-Control", dt.cacheControlNotFoundHeader)
+		http.Error(w, "", http.StatusNotFound)
+	}
+}
+
+func (dt *delegatedTranslator) findJSON(r *http.Request, uri *url.URL, encrypted bool, w http.ResponseWriter, flt *filters) {
 	rcode, resp := dt.be(r.Context(), http.MethodGet, findMethodDelegated, uri, encrypted)
-	if rcode != http.StatusOK {
+	if rcode == http.StatusNotFound {
+		w.Header().Set("Cache-Control", dt.cacheControlNotFoundHeader)
+		http.Error(w, "", http.StatusNotFound)
+		return
+	} else if rcode != http.StatusOK {
 		http.Error(w, "", rcode)
 		return
 	}
@@ -190,6 +215,7 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		http.Error(w, "", http.StatusInternalServerError)
 	}
 
+	w.Header().Set("Cache-Control", dt.cacheControlSuccessHeader)
 	writeJsonResponse(w, http.StatusOK, outBytes)
 }
 
