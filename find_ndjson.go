@@ -34,6 +34,7 @@ type (
 		bitswapTransportCount   int64
 		graphsyncTransportCount int64
 		unknwonTransportCount   int64
+		entriesByProvider       map[string]int64
 	}
 )
 
@@ -73,6 +74,11 @@ func (rs *resultStats) observeResult(result *encryptedOrPlainResult) {
 }
 
 func (rs *resultStats) observeProviderResult(result *model.ProviderResult) {
+	if rs.entriesByProvider == nil {
+		rs.entriesByProvider = make(map[string]int64)
+	}
+	rs.entriesByProvider[result.Provider.ID.String()]++
+
 	md := metadata.Default.New()
 	if err := md.UnmarshalBinary(result.Metadata); err != nil {
 		// TODO Refactor once there is concrete error type in index-provider
@@ -131,6 +137,25 @@ func (rs *resultStats) reportMetrics(method string) {
 		metrics.FindResponse.
 			WithLabelValues(method, "encrypted").
 			Add(float64(rs.encCount))
+	}
+
+	var totalEntries int64
+	for provider, count := range rs.entriesByProvider {
+		metrics.FindProviderResults.
+			WithLabelValues(provider, method).
+			Add(1)
+
+		metrics.FindProviderResultEntries.
+			WithLabelValues(provider, method).
+			Add(float64(count))
+
+		totalEntries += count
+	}
+
+	for provider, count := range rs.entriesByProvider {
+		metrics.FindProviderResultWeighted.
+			WithLabelValues(provider, method).
+			Add(float64(count) / float64(totalEntries))
 	}
 }
 

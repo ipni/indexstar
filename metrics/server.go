@@ -114,6 +114,28 @@ var (
 		},
 		[]string{LabelMethod},
 	)
+
+	FindProviderResults = promAuto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "indexstar_find_provider_results",
+			Help: "Number of results including a given provider",
+		},
+		[]string{LabelProvider, LabelMethod},
+	)
+	FindProviderResultWeighted = promAuto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "indexstar_find_provider_result_weighted",
+			Help: "Results per provider, weighted by their share of addresses in results",
+		},
+		[]string{LabelProvider, LabelMethod},
+	)
+	FindProviderResultEntries = promAuto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "indexstar_find_provider_result_entries",
+			Help: "Number of entries per provider returned total",
+		},
+		[]string{LabelProvider, LabelMethod},
+	)
 )
 
 func init() {
