@@ -26,10 +26,16 @@ var (
 )
 
 const (
-	backendsArg          = "backends"
-	cascadeBackendsArg   = "cascadeBackends"
-	dhBackendsArg        = "dhBackends"
-	providersBackendsArg = "providersBackends"
+	configArg                   = "config"
+	listenArg                   = "listen"
+	metricsArg                  = "metrics"
+	backendsArg                 = "backends"
+	cascadeBackendsArg          = "cascadeBackends"
+	dhBackendsArg               = "dhBackends"
+	providersBackendsArg        = "providersBackends"
+	translateNonStreamingArg    = "translateNonStreaming"
+	detailedProvidersMetricsArg = "detailedProvidersMetrics"
+	homepageURLArg              = "homepageURL"
 )
 
 type serverInterface interface {
@@ -51,6 +57,8 @@ type server struct {
 	indexPageCompileTime time.Time
 	pcache               *pcache.ProviderCache
 	pcounts              *ProviderMap
+
+	detailedProvidersMetrics bool
 }
 
 // caskadeBackend is a marker for caskade backends
@@ -69,7 +77,7 @@ type providersBackend struct {
 func NewServer(c *cli.Context) (serverInterface, error) {
 	var lc net.ListenConfig
 
-	bound, err := lc.Listen(c.Context, "tcp", c.String("listen"))
+	bound, err := lc.Listen(c.Context, "tcp", c.String(listenArg))
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +87,7 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 		}
 	}()
 
-	mb, err := lc.Listen(c.Context, "tcp", c.String("metrics"))
+	mb, err := lc.Listen(c.Context, "tcp", c.String(metricsArg))
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +104,10 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	pCounts := NewProviderMap(config.Server.TopProviderCardinality)
 
 	if len(servers) == 0 {
-		if !c.IsSet("config") {
+		if !c.IsSet(configArg) {
 			return nil, fmt.Errorf("no backends specified")
 		}
-		servers, err = Load(c.String("config"))
+		servers, err = Load(c.String(configArg))
 		if err != nil {
 			return nil, fmt.Errorf("could not load backends from config: %w", err)
 		}
@@ -156,24 +164,25 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	if err = indexTemplate.Execute(&indexPageBuf, struct {
 		URL string
 	}{
-		URL: c.String("homepageURL"),
+		URL: c.String(homepageURLArg),
 	}); err != nil {
 		return nil, err
 	}
 	compileTime := time.Now()
 
 	s := server{
-		ctx:                   c.Context,
-		httpClient:            httpClient,
-		cfgBase:               c.String("config"),
-		listener:              bound,
-		metricsListener:       mb,
-		backends:              backends,
-		translateNonStreaming: c.Bool("translateNonStreaming"),
-		indexPage:             indexPageBuf.Bytes(),
-		indexPageCompileTime:  compileTime,
-		pcache:                pc,
-		pcounts:               pCounts,
+		ctx:                      c.Context,
+		httpClient:               httpClient,
+		cfgBase:                  c.String("config"),
+		listener:                 bound,
+		metricsListener:          mb,
+		backends:                 backends,
+		translateNonStreaming:    c.Bool("translateNonStreaming"),
+		indexPage:                indexPageBuf.Bytes(),
+		indexPageCompileTime:     compileTime,
+		pcache:                   pc,
+		pcounts:                  pCounts,
+		detailedProvidersMetrics: c.Bool(detailedProvidersMetricsArg),
 	}
 
 	// Listeners propagated to the server, don't close on defer
