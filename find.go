@@ -414,7 +414,7 @@ outer:
 	}
 
 	rs.observeFindResponse(&resp)
-	rs.reportMetrics(source)
+	rs.reportMetrics(source, s.detailedProvidersMetrics)
 
 	// write out combined.
 	outData, err := model.MarshalFindResponse(&resp)

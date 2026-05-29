@@ -81,6 +81,11 @@ func runApp(
 				Name:  translateNonStreamingArg,
 				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
 			},
+			&cli.BoolFlag{
+				Name:   detailedProvidersMetricsArg,
+				Usage:  "Whether to report detailed stats for providers through metrics.",
+				Hidden: true,
+			},
 			&cli.StringFlag{
 				Name:  homepageURLArg,
 				Usage: "The actual webUI backend to be rendered via iframe.",

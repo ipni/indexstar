@@ -38,6 +38,8 @@ type (
 	}
 )
 
+const detailedProvidersMetricsCardinalitySafetyLimit = 500
+
 func (r resultSet) putIfAbsent(p *encryptedOrPlainResult) bool {
 	// Calculate crc32 hash from provider ID + context ID to check for uniqueness of returned
 	// results. The rationale for using crc32 hashing is that it is fast and good enough
@@ -114,7 +116,7 @@ func (rs *resultStats) observeFindResponse(resp *model.FindResponse) {
 	}
 }
 
-func (rs *resultStats) reportMetrics(method string) {
+func (rs *resultStats) reportMetrics(method string, detailedProvidersMetrics bool) {
 	if rs.bitswapTransportCount > 0 {
 		metrics.FindResponse.
 			WithLabelValues(method, multicodec.TransportBitswap.String()).
@@ -137,6 +139,20 @@ func (rs *resultStats) reportMetrics(method string) {
 		metrics.FindResponse.
 			WithLabelValues(method, "encrypted").
 			Add(float64(rs.encCount))
+	}
+
+	if detailedProvidersMetrics {
+		rs.reportDetailedProvidersMetrics(method)
+	}
+}
+
+func (rs *resultStats) reportDetailedProvidersMetrics(method string) {
+	if len(rs.entriesByProvider) >= detailedProvidersMetricsCardinalitySafetyLimit {
+		// Stop emitting detailed providers metrics to avoid high cardinality.
+		metrics.FindProviderResults.DeletePartialMatch(nil)
+		metrics.FindProviderResultEntries.DeletePartialMatch(nil)
+		metrics.FindProviderResultWeighted.DeletePartialMatch(nil)
+		return
 	}
 
 	var totalEntries int64
@@ -413,7 +429,7 @@ func (s *server) doFindNDJson(
 
 	defer func() {
 		if found {
-			rs.reportMetrics(method)
+			rs.reportMetrics(method, s.detailedProvidersMetrics)
 		}
 
 		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
@@ -512,7 +528,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 			close(out)
 
 			if found {
-				rs.reportMetrics(method)
+				rs.reportMetrics(method, s.detailedProvidersMetrics)
 			}
 
 			metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))

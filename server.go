@@ -26,15 +26,16 @@ var (
 )
 
 const (
-	configArg                = "config"
-	listenArg                = "listen"
-	metricsArg               = "metrics"
-	backendsArg              = "backends"
-	cascadeBackendsArg       = "cascadeBackends"
-	dhBackendsArg            = "dhBackends"
-	providersBackendsArg     = "providersBackends"
-	translateNonStreamingArg = "translateNonStreaming"
-	homepageURLArg           = "homepageURL"
+	configArg                   = "config"
+	listenArg                   = "listen"
+	metricsArg                  = "metrics"
+	backendsArg                 = "backends"
+	cascadeBackendsArg          = "cascadeBackends"
+	dhBackendsArg               = "dhBackends"
+	providersBackendsArg        = "providersBackends"
+	translateNonStreamingArg    = "translateNonStreaming"
+	detailedProvidersMetricsArg = "detailedProvidersMetrics"
+	homepageURLArg              = "homepageURL"
 )
 
 type serverInterface interface {
@@ -56,6 +57,8 @@ type server struct {
 	indexPageCompileTime time.Time
 	pcache               *pcache.ProviderCache
 	pcounts              *ProviderMap
+
+	detailedProvidersMetrics bool
 }
 
 // caskadeBackend is a marker for caskade backends
@@ -168,17 +171,18 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	compileTime := time.Now()
 
 	s := server{
-		Context:               c.Context,
-		Client:                httpClient,
-		cfgBase:               c.String(configArg),
-		Listener:              bound,
-		metricsListener:       mb,
-		backends:              backends,
-		translateNonStreaming: c.Bool(translateNonStreamingArg),
-		indexPage:             indexPageBuf.Bytes(),
-		indexPageCompileTime:  compileTime,
-		pcache:                pc,
-		pcounts:               pCounts,
+		Context:                  c.Context,
+		Client:                   httpClient,
+		cfgBase:                  c.String(configArg),
+		Listener:                 bound,
+		metricsListener:          mb,
+		backends:                 backends,
+		translateNonStreaming:    c.Bool(translateNonStreamingArg),
+		indexPage:                indexPageBuf.Bytes(),
+		indexPageCompileTime:     compileTime,
+		pcache:                   pc,
+		pcounts:                  pCounts,
+		detailedProvidersMetrics: c.Bool(detailedProvidersMetricsArg),
 	}
 
 	// Listeners propagated to the server, don't close on defer
