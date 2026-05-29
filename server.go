@@ -26,10 +26,15 @@ var (
 )
 
 const (
-	backendsArg          = "backends"
-	cascadeBackendsArg   = "cascadeBackends"
-	dhBackendsArg        = "dhBackends"
-	providersBackendsArg = "providersBackends"
+	configArg                = "config"
+	listenArg                = "listen"
+	metricsArg               = "metrics"
+	backendsArg              = "backends"
+	cascadeBackendsArg       = "cascadeBackends"
+	dhBackendsArg            = "dhBackends"
+	providersBackendsArg     = "providersBackends"
+	translateNonStreamingArg = "translateNonStreaming"
+	homepageURLArg           = "homepageURL"
 )
 
 type serverInterface interface {
@@ -69,7 +74,7 @@ type providersBackend struct {
 func NewServer(c *cli.Context) (serverInterface, error) {
 	var lc net.ListenConfig
 
-	bound, err := lc.Listen(c.Context, "tcp", c.String("listen"))
+	bound, err := lc.Listen(c.Context, "tcp", c.String(listenArg))
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +84,7 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 		}
 	}()
 
-	mb, err := lc.Listen(c.Context, "tcp", c.String("metrics"))
+	mb, err := lc.Listen(c.Context, "tcp", c.String(metricsArg))
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +101,10 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	pCounts := NewProviderMap(config.Server.TopProviderCardinality)
 
 	if len(servers) == 0 {
-		if !c.IsSet("config") {
+		if !c.IsSet(configArg) {
 			return nil, fmt.Errorf("no backends specified")
 		}
-		servers, err = Load(c.String("config"))
+		servers, err = Load(c.String(configArg))
 		if err != nil {
 			return nil, fmt.Errorf("could not load backends from config: %w", err)
 		}
@@ -156,7 +161,7 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	if err = indexTemplate.Execute(&indexPageBuf, struct {
 		URL string
 	}{
-		URL: c.String("homepageURL"),
+		URL: c.String(homepageURLArg),
 	}); err != nil {
 		return nil, err
 	}
@@ -165,11 +170,11 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	s := server{
 		Context:               c.Context,
 		Client:                httpClient,
-		cfgBase:               c.String("config"),
+		cfgBase:               c.String(configArg),
 		Listener:              bound,
 		metricsListener:       mb,
 		backends:              backends,
-		translateNonStreaming: c.Bool("translateNonStreaming"),
+		translateNonStreaming: c.Bool(translateNonStreamingArg),
 		indexPage:             indexPageBuf.Bytes(),
 		indexPageCompileTime:  compileTime,
 		pcache:                pc,

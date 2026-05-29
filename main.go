@@ -46,17 +46,17 @@ func runApp(
 		Usage: "indexstar is a point in the content routing galaxy - routes requests in a star topology",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:      "config",
+				Name:      configArg,
 				Usage:     "Path to config file",
 				TakesFile: true,
 			},
 			&cli.StringFlag{
-				Name:  "listen",
+				Name:  listenArg,
 				Usage: "HTTP server Listen address",
 				Value: ":8080",
 			},
 			&cli.StringFlag{
-				Name:  "metrics",
+				Name:  metricsArg,
 				Usage: "Metrics server listen address",
 				Value: ":8081",
 			},
@@ -78,11 +78,11 @@ func runApp(
 				Usage: "Backends to propagate providers requests to.",
 			},
 			&cli.BoolFlag{
-				Name:  "translateNonStreaming",
+				Name:  translateNonStreamingArg,
 				Usage: "Whether to translate non-streaming JSON requests to streaming NDJSON requests before scattering to backends.",
 			},
 			&cli.StringFlag{
-				Name:  "homepageURL",
+				Name:  homepageURLArg,
 				Usage: "The actual webUI backend to be rendered via iframe.",
 				Value: "https://web-ipni.cid.contact/",
 			},
