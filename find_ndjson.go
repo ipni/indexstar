@@ -34,8 +34,11 @@ type (
 		bitswapTransportCount   int64
 		graphsyncTransportCount int64
 		unknwonTransportCount   int64
+		entriesByProvider       map[string]int64
 	}
 )
+
+const detailedProvidersMetricsCardinalitySafetyLimit = 500
 
 func (r resultSet) putIfAbsent(p *encryptedOrPlainResult) bool {
 	// Calculate crc32 hash from provider ID + context ID to check for uniqueness of returned
@@ -73,6 +76,11 @@ func (rs *resultStats) observeResult(result *encryptedOrPlainResult) {
 }
 
 func (rs *resultStats) observeProviderResult(result *model.ProviderResult) {
+	if rs.entriesByProvider == nil {
+		rs.entriesByProvider = make(map[string]int64)
+	}
+	rs.entriesByProvider[result.Provider.ID.String()]++
+
 	md := metadata.Default.New()
 	if err := md.UnmarshalBinary(result.Metadata); err != nil {
 		// TODO Refactor once there is concrete error type in index-provider
@@ -108,7 +116,7 @@ func (rs *resultStats) observeFindResponse(resp *model.FindResponse) {
 	}
 }
 
-func (rs *resultStats) reportMetrics(method string) {
+func (rs *resultStats) reportMetrics(method string, detailedProvidersMetrics bool) {
 	if rs.bitswapTransportCount > 0 {
 		metrics.FindResponse.
 			WithLabelValues(method, multicodec.TransportBitswap.String()).
@@ -131,6 +139,39 @@ func (rs *resultStats) reportMetrics(method string) {
 		metrics.FindResponse.
 			WithLabelValues(method, "encrypted").
 			Add(float64(rs.encCount))
+	}
+
+	if detailedProvidersMetrics {
+		rs.reportDetailedProvidersMetrics(method)
+	}
+}
+
+func (rs *resultStats) reportDetailedProvidersMetrics(method string) {
+	if len(rs.entriesByProvider) >= detailedProvidersMetricsCardinalitySafetyLimit {
+		// Stop emitting detailed providers metrics to avoid high cardinality.
+		metrics.FindProviderResults.DeletePartialMatch(nil)
+		metrics.FindProviderResultEntries.DeletePartialMatch(nil)
+		metrics.FindProviderResultWeighted.DeletePartialMatch(nil)
+		return
+	}
+
+	var totalEntries int64
+	for provider, count := range rs.entriesByProvider {
+		metrics.FindProviderResults.
+			WithLabelValues(provider, method).
+			Add(1)
+
+		metrics.FindProviderResultEntries.
+			WithLabelValues(provider, method).
+			Add(float64(count))
+
+		totalEntries += count
+	}
+
+	for provider, count := range rs.entriesByProvider {
+		metrics.FindProviderResultWeighted.
+			WithLabelValues(provider, method).
+			Add(float64(count) / float64(totalEntries))
 	}
 }
 
@@ -388,7 +429,7 @@ func (s *server) doFindNDJson(
 
 	defer func() {
 		if found {
-			rs.reportMetrics(method)
+			rs.reportMetrics(method, s.detailedProvidersMetrics)
 		}
 
 		metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
@@ -487,7 +528,7 @@ func (s *server) doFindStreaming(ctx context.Context, method string, reqURL *url
 			close(out)
 
 			if found {
-				rs.reportMetrics(method)
+				rs.reportMetrics(method, s.detailedProvidersMetrics)
 			}
 
 			metrics.ReportFindLatency(method, found, foundCaskade, foundRegular, time.Since(start))
