@@ -317,6 +317,7 @@ func (s *server) Serve() <-chan error {
 		s.doFindStreaming,
 		config.DelegatedRouting.CacheControlSuccessHeader,
 		config.DelegatedRouting.CacheControlNotFoundHeader,
+		config.DelegatedRouting.MaxJSONEntries,
 	)
 	if err != nil {
 		ec <- err

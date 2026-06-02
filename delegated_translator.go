@@ -17,10 +17,6 @@ import (
 
 const (
 	peerSchema = "peer"
-
-	// The application/json responses SHOULD be limited to 100 providers.
-	// https://specs.ipfs.tech/routing/http-routing-v1/#response-body
-	maxNonStreamingResults = 100
 )
 
 type findFunc func(ctx context.Context, method, source string, req *url.URL, encrypted bool) (int, []byte)
@@ -31,12 +27,14 @@ func NewDelegatedTranslator(
 	streamingBackend findStreamFunc,
 	cacheControlSuccessHeader string,
 	cacheControlNotFoundHeader string,
+	maxJSONEntries int,
 ) (http.Handler, error) {
 	finder := delegatedTranslator{
 		be:                         backend,
 		sbe:                        streamingBackend,
 		cacheControlSuccessHeader:  cacheControlSuccessHeader,
 		cacheControlNotFoundHeader: cacheControlNotFoundHeader,
+		maxJSONEntries:             maxJSONEntries,
 	}
 	m := http.NewServeMux()
 	m.HandleFunc("/providers", finder.provide)
@@ -52,6 +50,7 @@ type delegatedTranslator struct {
 
 	cacheControlSuccessHeader  string
 	cacheControlNotFoundHeader string
+	maxJSONEntries             int
 }
 
 func (dt *delegatedTranslator) provide(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +203,7 @@ func (dt *delegatedTranslator) findJSON(r *http.Request, uri *url.URL, encrypted
 
 		out.append(prov)
 
-		if len(out.seenProviders) >= maxNonStreamingResults {
+		if len(out.seenProviders) >= dt.maxJSONEntries {
 			break
 		}
 	}
