@@ -4,22 +4,24 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type ProviderMap struct {
 	cardinality int
-	providers   map[string]*atomic.Int64
+	providers   map[peer.ID]*atomic.Int64
 	lock        sync.RWMutex
 }
 
 func NewProviderMap(cardinality int) *ProviderMap {
 	return &ProviderMap{
 		cardinality: cardinality,
-		providers:   make(map[string]*atomic.Int64),
+		providers:   make(map[peer.ID]*atomic.Int64),
 	}
 }
 
-func (pm *ProviderMap) Add(provider string) {
+func (pm *ProviderMap) Add(provider peer.ID) {
 	pm.lock.RLock()
 	defer pm.lock.RUnlock()
 	var c *atomic.Int64
@@ -42,7 +44,7 @@ func (pm *ProviderMap) Add(provider string) {
 }
 
 type ProviderCount struct {
-	Provider string
+	Provider peer.ID
 	Count    int64
 }
 
