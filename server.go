@@ -296,7 +296,9 @@ func (s *server) updateTopProviders() {
 	metrics.TopProvider.DeletePartialMatch(nil)
 
 	for _, rcrd := range top {
-		metrics.TopProvider.WithLabelValues(rcrd.Provider).Set(float64(rcrd.Count))
+		metrics.TopProvider.
+			WithLabelValues(rcrd.Provider.String()).
+			Set(float64(rcrd.Count))
 	}
 }
 
