@@ -23,13 +23,11 @@ func NewProviderMap(cardinality int) *ProviderMap {
 
 func (pm *ProviderMap) Add(provider peer.ID) {
 	pm.lock.RLock()
-	defer pm.lock.RUnlock()
-	var c *atomic.Int64
-	var exists bool
+	c, exists := pm.providers[provider]
+	pm.lock.RUnlock()
 
-	if c, exists = pm.providers[provider]; !exists {
+	if !exists {
 		// slow case..
-		pm.lock.RUnlock()
 		pm.lock.Lock()
 		if c, exists = pm.providers[provider]; !exists { // Double-check
 			newP := atomic.Int64{}
@@ -37,7 +35,6 @@ func (pm *ProviderMap) Add(provider peer.ID) {
 			c = &newP
 		}
 		pm.lock.Unlock()
-		pm.lock.RLock()
 	}
 
 	c.Add(1)
@@ -49,7 +46,19 @@ type ProviderCount struct {
 }
 
 func (pm *ProviderMap) Top() []ProviderCount {
-	n := pm.cardinality
+	pairs := pm.gatherProviderCounts()
+
+	// Sort pairs by count in descending order
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].Count > pairs[j].Count
+	})
+
+	n := min(pm.cardinality, len(pairs))
+
+	return pairs[0:n]
+}
+
+func (pm *ProviderMap) gatherProviderCounts() []ProviderCount {
 	pm.lock.RLock()
 	defer pm.lock.RUnlock()
 
@@ -58,14 +67,5 @@ func (pm *ProviderMap) Top() []ProviderCount {
 		pairs = append(pairs, ProviderCount{Provider: provider, Count: count.Load()})
 	}
 
-	// Sort pairs by count in descending order
-	sort.Slice(pairs, func(i, j int) bool {
-		return pairs[i].Count > pairs[j].Count
-	})
-
-	if n > len(pairs) {
-		n = len(pairs)
-	}
-
-	return pairs[0:n]
+	return pairs
 }
