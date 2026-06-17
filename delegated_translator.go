@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"hash/crc32"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
+	"time"
 
 	"github.com/ipni/go-libipni/find/model"
 	"github.com/ipni/go-libipni/metadata"
@@ -94,6 +97,8 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 		return
 	}
 
+	dt.testPinataDRLatency(r)
+
 	// Get the CID resource from the last element in the URL path.
 	cidUrlParam := path.Base(r.URL.Path)
 
@@ -119,6 +124,84 @@ func (dt *delegatedTranslator) find(w http.ResponseWriter, r *http.Request, encr
 	default:
 		dt.findJSON(r, uri, encrypted, w, flt)
 	}
+}
+
+func (dt *delegatedTranslator) testPinataDRLatency(r *http.Request) {
+	url := *r.URL
+	url.Host = "indexer.pinata.cloud"
+	url.Scheme = "https"
+	url.Path = "/routing/v1" + url.Path
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
+		if err != nil {
+			log.Warnw("Failed to construct backend query", "err", err)
+			return
+		}
+
+		req.Header.Set("Accept", mediaTypeNDJson)
+		// req.Header.Set("X-Forwarded-Host", r.Host)
+
+		start := time.Now()
+		measureBackendLatency := func(errKind metrics.ErrKind) {
+			metrics.ReportFindBackendMetrics(
+				req.URL.Host,
+				"test-latency",
+				true,
+				errKind,
+				time.Since(start),
+				0,
+				0,
+			)
+		}
+		log := log.With("backend", req.URL.Host)
+
+		resp, err := http.DefaultClient.Do(req)
+		switch {
+		case errors.Is(err, context.Canceled):
+			measureBackendLatency(metrics.ErrKindRequestCanceled)
+			log.Debugw("Backend query ended", "err", err)
+			return
+
+		case errors.Is(err, context.DeadlineExceeded):
+			measureBackendLatency(metrics.ErrKindRequestDeadline)
+			log.Debugw("Backend query timed out", "err", err)
+			return
+
+		case err != nil:
+			measureBackendLatency(metrics.ErrKindRequestFailed)
+			log.Warnw("Failed to query backend", "err", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// buff := bytes.NewBuffer(nil)
+
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			log.Warnw("Failed to read response body", "err", err)
+			measureBackendLatency(metrics.ErrKindReadFailed)
+			return
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			// log.Debugw("response body", "body", buff.String())
+			measureBackendLatency(metrics.ErrKindNone)
+
+		case http.StatusNotFound:
+			log.Debugw("not found response", "url", req.URL.String())
+			measureBackendLatency(metrics.ErrKindNotFound)
+
+		default:
+			log.Debugw("bad response", "url", req.URL.String(), "status", resp.StatusCode)
+			// log.Debugw("response body", "body", buff.String())
+			log.Debugw("request", "request", req)
+			measureBackendLatency(metrics.ErrKindHttpStatus(resp.StatusCode))
+		}
+	}()
 }
 
 func (dt *delegatedTranslator) findNDJSon(r *http.Request, uri *url.URL, encrypted bool, w http.ResponseWriter, flt *filters) {
