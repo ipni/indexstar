@@ -465,7 +465,7 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 			require.Contains(t, resp.Header.Get("Content-Type"), dd.ExpectedContentType)
 
 			allowedMethods := []string{}
-			for _, method := range strings.Split(resp.Header.Get("Allow"), ",") {
+			for method := range strings.SplitSeq(resp.Header.Get("Allow"), ",") {
 				if method = strings.TrimSpace(method); method != "" {
 					allowedMethods = append(allowedMethods, method)
 				}
