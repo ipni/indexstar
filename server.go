@@ -400,7 +400,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJsonResponse(w, http.StatusOK, []byte("ready"))
+	writeJsonResponse(w, http.StatusOK, []byte(`{"status":"ready"}`))
 }
 
 func writeJsonResponse(w http.ResponseWriter, status int, body []byte) {
