@@ -19,6 +19,20 @@ type accepts struct {
 	acceptHeaderFound bool
 }
 
+// mediaTypeFromContentType returns the media type from a Content-Type header
+// value, ignoring parameters such as charset. An empty or invalid value yields
+// fallback.
+func mediaTypeFromContentType(contentType, fallback string) string {
+	if contentType == "" {
+		return fallback
+	}
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return fallback
+	}
+	return mt
+}
+
 func getAccepts(r *http.Request) (accepts, error) {
 	var a accepts
 	values := r.Header.Values("Accept")

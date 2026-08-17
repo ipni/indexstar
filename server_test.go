@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,6 +201,182 @@ func (s *serverTestSuite) TestStreamingFind() {
 	`, dataSplit[1])
 
 	require.Empty(t, dataSplit[2])
+}
+
+func (s *serverTestSuite) TestFindCIDConvertsBackendJSONToNDJSON() {
+	t := s.T()
+
+	decoded, err := cid.Decode(testFindCID)
+	require.NoError(t, err)
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+testFindCID, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+
+		err := json.NewEncoder(w).Encode(map[string]any{
+			"MultihashResults": []any{
+				map[string]any{
+					"Multihash": decoded.Hash(),
+					"ProviderResults": []any{
+						map[string]any{
+							"ContextID": "Y3R4MQ==",
+							"Metadata":  "gBI=",
+							"Provider": map[string]any{
+								"ID":    testProviderID,
+								"Addrs": []string{testProviderAddr},
+							},
+						},
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("http://%s/cid/%s", s.srvListener.Addr(), testFindCID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/x-ndjson")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "application/x-ndjson", resp.Header.Get("Content-Type"))
+
+	var result encryptedOrPlainResult
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.Equal(t, testProviderID, result.Provider.ID.String())
+	require.Equal(t, testProviderAddr, result.Provider.Addrs[0].String())
+}
+
+func (s *serverTestSuite) TestFindCIDConvertsBackendNDJSONToJSON() {
+	t := s.T()
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+testFindCID, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/json")
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+		writeOneLineJSON(t, w, `
+			{
+				"ContextID":"Y3R4MQ==",
+				"Metadata":"gBI=",
+				"Provider":{
+					"ID":"`+testProviderID+`",
+					"Addrs":["`+testProviderAddr+`"]
+				}
+			}
+		`)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("http://%s/cid/%s", s.srvListener.Addr(), testFindCID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, resp.Header.Get("Content-Type"), "application/json")
+
+	var parsed struct {
+		MultihashResults []struct {
+			ProviderResults []struct {
+				Provider struct {
+					ID    string
+					Addrs []string
+				}
+			}
+		}
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&parsed))
+	require.Len(t, parsed.MultihashResults, 1)
+	require.Len(t, parsed.MultihashResults[0].ProviderResults, 1)
+	require.Equal(t, testProviderID, parsed.MultihashResults[0].ProviderResults[0].Provider.ID)
+	require.Equal(t, []string{testProviderAddr}, parsed.MultihashResults[0].ProviderResults[0].Provider.Addrs)
+}
+
+func (s *serverTestSuite) TestFindCIDBackendContentTypeIsPerResponse() {
+	t := s.T()
+
+	decoded, err := cid.Decode(testFindCID)
+	require.NoError(t, err)
+
+	var calls atomic.Int32
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+		call := calls.Add(1)
+		if call == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			err := json.NewEncoder(w).Encode(map[string]any{
+				"MultihashResults": []any{
+					map[string]any{
+						"Multihash": decoded.Hash(),
+						"ProviderResults": []any{
+							map[string]any{
+								"ContextID": "Y3R4MQ==",
+								"Metadata":  "gBI=",
+								"Provider": map[string]any{
+									"ID":    testProviderID,
+									"Addrs": []string{testProviderAddr},
+								},
+							},
+						},
+					},
+				},
+			})
+			require.NoError(t, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		writeOneLineJSON(t, w, `
+			{
+				"ContextID":"Y3R4Mg==",
+				"Metadata":"gBI=",
+				"Provider":{
+					"ID":"`+testProviderID+`",
+					"Addrs":["`+testProviderAddr+`"]
+				}
+			}
+		`)
+	}
+
+	doNDJSONFind := func() encryptedOrPlainResult {
+		req, err := http.NewRequest(
+			http.MethodGet,
+			fmt.Sprintf("http://%s/cid/%s", s.srvListener.Addr(), testFindCID),
+			nil,
+		)
+		require.NoError(t, err)
+		req.Header.Set("Accept", "application/x-ndjson")
+
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var result encryptedOrPlainResult
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+		return result
+	}
+
+	first := doNDJSONFind()
+	require.Equal(t, []byte("ctx1"), first.ContextID)
+
+	second := doNDJSONFind()
+	require.Equal(t, []byte("ctx2"), second.ContextID)
+	require.Equal(t, int32(2), calls.Load())
 }
 
 func (s *serverTestSuite) TestStreamingFindMalformedBackend() {

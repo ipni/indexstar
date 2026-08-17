@@ -289,76 +289,144 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			return nil, err
 		}
 
-		scanner := bufio.NewScanner(resp.Body)
-		providersCount := 0
-		for {
-			select {
-			case <-cctx.Done():
-				return nil, nil
-			default:
-				if scanner.Scan() {
-					var result encryptedOrPlainResult
-					line := scanner.Bytes()
-					if len(line) == 0 {
-						continue
-					}
+		// Decide how to parse this response from its Content-Type. This is
+		// checked per response, not cached per backend: a backend may switch
+		// between JSON and NDJSON over time.
+		mediaType := mediaTypeFromContentType(resp.Header.Get("Content-Type"), mediaTypeNDJson)
 
-					providersCount++
-					if err := json.Unmarshal(line, &result); err != nil {
-						measureBackendLatency(metrics.ErrKindUnmarshalFailed)
-						log.Debugw(
-							"failed to unmarshal backend response line",
-							"line", string(line),
-							"respContentType", resp.Header.Get("Content-Type"),
-							"err", err,
-						)
-						return nil, circuitbreaker.MarkAsSuccess(err)
-					}
-					// Sanity check the results in case backends don't respect accept media types;
-					// see: https://github.com/ipni/storetheindex/issues/1209
-					if len(result.EncryptedValueKey) == 0 && (result.Provider == nil || result.Provider.ID == "" || len(result.Provider.Addrs) == 0) {
-						malformedBackendEntriesCount++
-						log.Debugw(
-							"skipping malformed result",
-							"line", string(line),
-							"respContentType", resp.Header.Get("Content-Type"),
-							"err", err,
-						)
-						continue
-					}
+		switch mediaType {
+		case mediaTypeJson:
+			data, err := io.ReadAll(resp.Body)
+			switch {
+			case errors.Is(err, context.Canceled):
+				measureBackendLatency(metrics.ErrKindReadCanceled)
+				log.Debugw("Reading backend response cancelled", "err", err)
+				return nil, err
+			case errors.Is(err, context.DeadlineExceeded):
+				measureBackendLatency(metrics.ErrKindReadDeadline)
+				log.Debugw("Reading backend response timed out", "err", err)
+				return nil, err
+			case err != nil:
+				measureBackendLatency(metrics.ErrKindReadFailed)
+				log.Warnw("Failed to read backend response", "err", err)
+				return nil, circuitbreaker.MarkAsSuccess(err)
+			}
 
-					validBackendEntriesCount++
+			parsed, err := model.UnmarshalFindResponse(data)
+			if err != nil {
+				measureBackendLatency(metrics.ErrKindUnmarshalFailed)
+				log.Debugw(
+					"failed to unmarshal backend JSON find response",
+					"respContentType", resp.Header.Get("Content-Type"),
+					"err", err,
+				)
+				return nil, circuitbreaker.MarkAsSuccess(err)
+			}
 
-					select {
-					case <-cctx.Done():
-						return nil, nil
-					case resultsChan <- &resultWithBackend{rslt: &result, bknd: b}:
-						totalResultsCount.Add(1)
-					}
+			for _, result := range resultsFromFindResponse(parsed) {
+				if !usableResult(result) {
+					malformedBackendEntriesCount++
+					log.Debugw(
+						"skipping malformed result",
+						"respContentType", resp.Header.Get("Content-Type"),
+					)
 					continue
 				}
-				if err := scanner.Err(); err != nil {
-					switch {
-					case errors.Is(err, context.Canceled):
-						measureBackendLatency(metrics.ErrKindReadCanceled)
-						log.Debugw("Reading backend response cancelled", "err", err)
-					case errors.Is(err, context.DeadlineExceeded):
-						measureBackendLatency(metrics.ErrKindReadDeadline)
-						log.Debugw("Reading backend response timed out", "err", err)
-					default:
-						measureBackendLatency(metrics.ErrKindReadFailed)
-						log.Warnw("Failed to read backend response", "err", err)
-					}
-					return nil, circuitbreaker.MarkAsSuccess(err)
-				}
 
-				measureBackendLatency(metrics.ErrKindNone)
-				log.Debugw(
-					"Finished processing results from backend",
-					"providersCount", providersCount,
-				)
-				return nil, nil
+				validBackendEntriesCount++
+				select {
+				case <-cctx.Done():
+					return nil, nil
+				case resultsChan <- &resultWithBackend{rslt: result, bknd: b}:
+					totalResultsCount.Add(1)
+				}
 			}
+
+			measureBackendLatency(metrics.ErrKindNone)
+			log.Debugw(
+				"Finished processing JSON results from backend",
+				"providersCount", validBackendEntriesCount,
+			)
+			return nil, nil
+
+		case mediaTypeNDJson:
+			scanner := bufio.NewScanner(resp.Body)
+			providersCount := 0
+			for {
+				select {
+				case <-cctx.Done():
+					return nil, nil
+				default:
+					if scanner.Scan() {
+						var result encryptedOrPlainResult
+						line := scanner.Bytes()
+						if len(line) == 0 {
+							continue
+						}
+
+						providersCount++
+						if err := json.Unmarshal(line, &result); err != nil {
+							measureBackendLatency(metrics.ErrKindUnmarshalFailed)
+							log.Debugw(
+								"failed to unmarshal backend response line",
+								"line", string(line),
+								"respContentType", resp.Header.Get("Content-Type"),
+								"err", err,
+							)
+							return nil, circuitbreaker.MarkAsSuccess(err)
+						}
+						if !usableResult(&result) {
+							malformedBackendEntriesCount++
+							log.Debugw(
+								"skipping malformed result",
+								"line", string(line),
+								"respContentType", resp.Header.Get("Content-Type"),
+							)
+							continue
+						}
+
+						validBackendEntriesCount++
+
+						select {
+						case <-cctx.Done():
+							return nil, nil
+						case resultsChan <- &resultWithBackend{rslt: &result, bknd: b}:
+							totalResultsCount.Add(1)
+						}
+						continue
+					}
+					if err := scanner.Err(); err != nil {
+						switch {
+						case errors.Is(err, context.Canceled):
+							measureBackendLatency(metrics.ErrKindReadCanceled)
+							log.Debugw("Reading backend response cancelled", "err", err)
+						case errors.Is(err, context.DeadlineExceeded):
+							measureBackendLatency(metrics.ErrKindReadDeadline)
+							log.Debugw("Reading backend response timed out", "err", err)
+						default:
+							measureBackendLatency(metrics.ErrKindReadFailed)
+							log.Warnw("Failed to read backend response", "err", err)
+						}
+						return nil, circuitbreaker.MarkAsSuccess(err)
+					}
+
+					measureBackendLatency(metrics.ErrKindNone)
+					log.Debugw(
+						"Finished processing results from backend",
+						"providersCount", providersCount,
+					)
+					return nil, nil
+				}
+			}
+
+		default:
+			measureBackendLatency(metrics.ErrKindInvalidContentType)
+			io.Copy(io.Discard, resp.Body)
+			log.Debugw(
+				"unsupported backend content type",
+				"respContentType", resp.Header.Get("Content-Type"),
+			)
+			return nil, nil
 		}
 	}); err != nil {
 		log.Errorw("Failed to scatter HTTP find request", "err", err)
