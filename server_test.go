@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,12 +98,14 @@ func (s *serverTestSuite) TearDownTest() {
 	s.srvListener.Close()
 	s.metricsListener.Close()
 	s.testBackendServer.Close()
+	logging.SetAllLoggers(logging.LevelError)
 }
 
-func writeOneLineJSON(t *testing.T, w io.Writer, j string) {
-	var data any
+func writeOneLineJSON(t *testing.T, w io.Writer, format string, args ...any) {
+	t.Helper()
 
-	err := json.Unmarshal([]byte(j), &data)
+	var data any
+	err := json.Unmarshal([]byte(fmt.Sprintf(format, args...)), &data)
 	require.NoError(t, err)
 
 	err = json.NewEncoder(w).Encode(data)
@@ -215,24 +218,24 @@ func (s *serverTestSuite) TestFindCIDConvertsBackendJSONToNDJSON() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
-		err := json.NewEncoder(w).Encode(map[string]any{
-			"MultihashResults": []any{
-				map[string]any{
-					"Multihash": decoded.Hash(),
-					"ProviderResults": []any{
-						map[string]any{
-							"ContextID": "Y3R4MQ==",
-							"Metadata":  "gBI=",
-							"Provider": map[string]any{
-								"ID":    testProviderID,
-								"Addrs": []string{testProviderAddr},
-							},
-						},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
+		writeOneLineJSON(t, w, `
+			{
+				"MultihashResults": [{
+					"Multihash": %[1]q,
+					"ProviderResults": [{
+						"ContextID": "Y3R4MQ==",
+						"Metadata": "gBI=",
+						"Provider": {
+							"ID": %[2]q,
+							"Addrs": [%[3]q]
+						}
+					}]
+				}]
+			}`,
+			base64.StdEncoding.EncodeToString(decoded.Hash()), // %[1]
+			testProviderID,   // %[2]
+			testProviderAddr, // %[3]
+		)
 	}
 
 	req, err := http.NewRequest(
@@ -268,11 +271,13 @@ func (s *serverTestSuite) TestFindCIDConvertsBackendNDJSONToJSON() {
 				"ContextID":"Y3R4MQ==",
 				"Metadata":"gBI=",
 				"Provider":{
-					"ID":"`+testProviderID+`",
-					"Addrs":["`+testProviderAddr+`"]
+					"ID": %[1]q,
+					"Addrs": [%[2]q]
 				}
-			}
-		`)
+			}`,
+			testProviderID,   // %[1]
+			testProviderAddr, // %[2]
+		)
 	}
 
 	req, err := http.NewRequest(
@@ -318,24 +323,24 @@ func (s *serverTestSuite) TestFindCIDBackendContentTypeIsPerResponse() {
 		call := calls.Add(1)
 		if call == 1 {
 			w.Header().Set("Content-Type", "application/json")
-			err := json.NewEncoder(w).Encode(map[string]any{
-				"MultihashResults": []any{
-					map[string]any{
-						"Multihash": decoded.Hash(),
-						"ProviderResults": []any{
-							map[string]any{
-								"ContextID": "Y3R4MQ==",
-								"Metadata":  "gBI=",
-								"Provider": map[string]any{
-									"ID":    testProviderID,
-									"Addrs": []string{testProviderAddr},
-								},
-							},
-						},
-					},
-				},
-			})
-			require.NoError(t, err)
+			writeOneLineJSON(t, w, `
+				{
+					"MultihashResults": [{
+						"Multihash": %[1]q,
+						"ProviderResults": [{
+							"ContextID": "Y3R4MQ==",
+							"Metadata": "gBI=",
+							"Provider": {
+								"ID": %[2]q,
+								"Addrs": [%[3]q]
+							}
+						}]
+					}]
+				}`,
+				base64.StdEncoding.EncodeToString(decoded.Hash()), // %[1]
+				testProviderID,   // %[2]
+				testProviderAddr, // %[3]
+			)
 			return
 		}
 
@@ -345,11 +350,14 @@ func (s *serverTestSuite) TestFindCIDBackendContentTypeIsPerResponse() {
 				"ContextID":"Y3R4Mg==",
 				"Metadata":"gBI=",
 				"Provider":{
-					"ID":"`+testProviderID+`",
-					"Addrs":["`+testProviderAddr+`"]
+					"ID": %[1]q,
+					"Addrs": [%[2]q]
 				}
-			}
-		`)
+			}`,
+			testProviderID,   // %[1]
+			testProviderAddr, // %[2]
+		)
+
 	}
 
 	doNDJSONFind := func() encryptedOrPlainResult {
