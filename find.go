@@ -204,6 +204,7 @@ func (s *server) find(w http.ResponseWriter, r *http.Request, mh multihash.Multi
 
 func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.URL, encrypted bool) (int, []byte) {
 	start := time.Now()
+	cmp := newSfSf2Cmp(reqURL.Path, s.backends)
 
 	// sgResponse is a struct that exists to capture the backend that the response has been received from
 	type sgResponse struct {
@@ -327,12 +328,14 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 				entriesCount += len(mr.ProviderResults)
 			}
 			backendMetrics(entriesCount, metrics.ErrKindNone)
+			cmp.addFindResponse(b, providers)
 
 			return &sgResponse{bknd: b, rsp: providers}, nil
 
 		case http.StatusNotFound:
 			backendMetrics(0, metrics.ErrKindNotFound)
 			atomic.AddInt32(&count, 1)
+			cmp.done(b)
 			return nil, nil
 
 		default:
@@ -411,6 +414,10 @@ outer:
 				resp.EncryptedMultihashResults[0].EncryptedValueKeys = append(resp.EncryptedMultihashResults[0].EncryptedValueKeys, r.rsp.EncryptedMultihashResults[0].EncryptedValueKeys...)
 			}
 		}
+	}
+
+	if ctx.Err() == nil {
+		cmp.finish()
 	}
 
 	metrics.FindBackends.Set(float64(atomic.LoadInt32(&count)))
