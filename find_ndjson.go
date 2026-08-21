@@ -369,7 +369,6 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 		case mediaTypeNDJson:
 			scanner := bufio.NewScanner(resp.Body)
-			providersCount := 0
 			for {
 				select {
 				case <-cctx.Done():
@@ -382,7 +381,6 @@ func (s *server) fetchUpstreamNDJsonResponses(
 							continue
 						}
 
-						providersCount++
 						if err := json.Unmarshal(line, &result); err != nil {
 							measureBackendLatency(metrics.ErrKindUnmarshalFailed)
 							log.Debugw(
@@ -430,8 +428,9 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 					measureBackendLatency(metrics.ErrKindNone)
 					log.Debugw(
-						"Finished processing results from backend",
-						"providersCount", providersCount,
+						"Finished processing NDJSON results from backend",
+						"providersCount", validBackendEntriesCount,
+						"malformedCount", malformedBackendEntriesCount,
 					)
 					return nil, nil
 				}

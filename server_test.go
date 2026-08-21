@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -466,6 +468,161 @@ func (s *serverTestSuite) TestStreamingFindMalformedBackend() {
 		require.NoError(t, err)
 		require.Empty(t, bytes.TrimSpace(data))
 	}
+}
+
+func decodeNDJSONResults(t *testing.T, body io.Reader) []encryptedOrPlainResult {
+	t.Helper()
+
+	var results []encryptedOrPlainResult
+	decoder := json.NewDecoder(body)
+	for {
+		var result encryptedOrPlainResult
+		err := decoder.Decode(&result)
+		if errors.Is(err, io.EOF) {
+			return results
+		}
+		require.NoError(t, err)
+		results = append(results, result)
+	}
+}
+
+func (s *serverTestSuite) findCIDNDJSON(t *testing.T) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("http://%s/cid/%s", s.srvListener.Addr(), testFindCID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/x-ndjson")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+func (s *serverTestSuite) backendHost(t *testing.T) string {
+	t.Helper()
+
+	u, err := url.Parse(s.testBackendServer.URL)
+	require.NoError(t, err)
+	return u.Host
+}
+
+func (s *serverTestSuite) TestFindCIDCountsValidAndMalformedNDJSONBackendEntries() {
+	t := s.T()
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+testFindCID, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+
+		writeOneLineJSON(t, w, `
+			{
+				"ContextID":"Y3R4MQ==",
+				"Metadata":"gBI=",
+				"Provider":{
+					"ID": %[1]q,
+					"Addrs": [%[2]q]
+				}
+			}`,
+			testProviderID,
+			testProviderAddr,
+		)
+		_, err := w.Write([]byte("\n"))
+		require.NoError(t, err)
+		_, err = w.Write([]byte(`{"ContextID":"Y3R4eA==","Metadata":"gBI="}` + "\n"))
+		require.NoError(t, err)
+		writeOneLineJSON(t, w, `
+			{
+				"ContextID":"Y3R4Mg==",
+				"Metadata":"gBI=",
+				"Provider":{
+					"ID": %[1]q,
+					"Addrs": [%[2]q]
+				}
+			}`,
+			testProviderID,
+			testProviderAddr,
+		)
+	}
+
+	resp := s.findCIDNDJSON(t)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	results := decodeNDJSONResults(t, resp.Body)
+	require.Len(t, results, 2)
+	require.Equal(t, []byte("ctx1"), results[0].ContextID)
+	require.Equal(t, []byte("ctx2"), results[1].ContextID)
+
+	valid, malformed, unexpected := readFindBackendEntriesFetched(t, s.backendHost(t))
+	require.Equal(t, 2.0, valid)
+	require.Equal(t, 1.0, malformed)
+	require.Zero(t, unexpected)
+}
+
+func (s *serverTestSuite) TestFindCIDCountsValidAndMalformedJSONBackendEntries() {
+	t := s.T()
+
+	decoded, err := cid.Decode(testFindCID)
+	require.NoError(t, err)
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+testFindCID, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		writeOneLineJSON(t, w, `
+			{
+				"MultihashResults": [{
+					"Multihash": %[1]q,
+					"ProviderResults": [
+						{
+							"ContextID": "Y3R4MQ==",
+							"Metadata": "gBI=",
+							"Provider": {
+								"ID": %[2]q,
+								"Addrs": [%[3]q]
+							}
+						},
+						{
+							"ContextID": "Y3R4eA==",
+							"Metadata": "gBI="
+						},
+						{
+							"ContextID": "Y3R4Mg==",
+							"Metadata": "gBI=",
+							"Provider": {
+								"ID": %[2]q,
+								"Addrs": [%[3]q]
+							}
+						}
+					]
+				}]
+			}`,
+			base64.StdEncoding.EncodeToString(decoded.Hash()),
+			testProviderID,
+			testProviderAddr,
+		)
+	}
+
+	resp := s.findCIDNDJSON(t)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	results := decodeNDJSONResults(t, resp.Body)
+	require.Len(t, results, 2)
+	require.Equal(t, []byte("ctx1"), results[0].ContextID)
+	require.Equal(t, []byte("ctx2"), results[1].ContextID)
+
+	valid, malformed, unexpected := readFindBackendEntriesFetched(t, s.backendHost(t))
+	require.Equal(t, 2.0, valid)
+	require.Equal(t, 1.0, malformed)
+	require.Zero(t, unexpected)
 }
 
 func randomPeerID(t *testing.T) peer.ID {
