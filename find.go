@@ -260,6 +260,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 				time.Since(start),
 				entriesCount,
 				0,
+				0,
 			)
 		}
 

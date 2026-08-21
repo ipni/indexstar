@@ -229,6 +229,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 
 		validBackendEntriesCount := 0
 		malformedBackendEntriesCount := 0
+		unexpectedMultihashCount := 0
 
 		start := time.Now()
 		measureBackendLatency := func(errKind metrics.ErrKind) {
@@ -240,6 +241,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 				time.Since(start),
 				validBackendEntriesCount,
 				malformedBackendEntriesCount,
+				unexpectedMultihashCount,
 			)
 		}
 
@@ -323,7 +325,21 @@ func (s *server) fetchUpstreamNDJsonResponses(
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
 
-			for _, result := range resultsFromFindResponse(parsed) {
+			expectedMH, err := multihashFromFindPath(reqURL.Path)
+			if err != nil {
+				measureBackendLatency(metrics.ErrKindUnmarshalFailed)
+				log.Debugw(
+					"failed to parse expected multihash from find path",
+					"path", reqURL.Path,
+					"err", err,
+				)
+				return nil, circuitbreaker.MarkAsSuccess(err)
+			}
+
+			converted, skippedUnexpected := resultsFromFindResponse(parsed, expectedMH)
+			unexpectedMultihashCount = skippedUnexpected
+
+			for _, result := range converted {
 				if !usableResult(result) {
 					malformedBackendEntriesCount++
 					log.Debugw(
@@ -346,6 +362,8 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			log.Debugw(
 				"Finished processing JSON results from backend",
 				"providersCount", validBackendEntriesCount,
+				"malformedCount", malformedBackendEntriesCount,
+				"unexpectedMultihashCount", unexpectedMultihashCount,
 			)
 			return nil, nil
 

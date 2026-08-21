@@ -22,23 +22,48 @@ func usableResult(result *encryptedOrPlainResult) bool {
 	return result.Provider != nil && result.Provider.ID != "" && len(result.Provider.Addrs) > 0
 }
 
-func resultsFromFindResponse(resp *model.FindResponse) []*encryptedOrPlainResult {
+func resultsFromFindResponse(resp *model.FindResponse, expected multihash.Multihash) (results []*encryptedOrPlainResult, skippedUnexpected int) {
 	if resp == nil {
-		return nil
+		return nil, 0
 	}
-	var out []*encryptedOrPlainResult
 	for _, mhr := range resp.MultihashResults {
+		if !bytes.Equal(mhr.Multihash, expected) {
+			skippedUnexpected += len(mhr.ProviderResults)
+			log.Debugw(
+				"skipping find results for unexpected multihash",
+				"expected", expected,
+				"got", mhr.Multihash,
+				"count", len(mhr.ProviderResults),
+			)
+			continue
+		}
 		for i := range mhr.ProviderResults {
 			pr := mhr.ProviderResults[i]
-			out = append(out, &encryptedOrPlainResult{ProviderResult: pr})
+			results = append(results, &encryptedOrPlainResult{ProviderResult: pr})
 		}
 	}
 	for _, emr := range resp.EncryptedMultihashResults {
+		if !bytes.Equal(emr.Multihash, expected) {
+			skippedUnexpected += len(emr.EncryptedValueKeys)
+			log.Debugw(
+				"skipping encrypted find results for unexpected multihash",
+				"expected", expected,
+				"got", emr.Multihash,
+				"count", len(emr.EncryptedValueKeys),
+			)
+			continue
+		}
 		for _, key := range emr.EncryptedValueKeys {
-			out = append(out, &encryptedOrPlainResult{EncryptedValueKey: key})
+			results = append(results, &encryptedOrPlainResult{EncryptedValueKey: key})
 		}
 	}
-	return out
+	if skippedUnexpected > 0 {
+		log.Warnw(
+			"skipped find results for unexpected multihash",
+			"count", skippedUnexpected,
+		)
+	}
+	return results, skippedUnexpected
 }
 
 func findResponseFromNDJSON(data []byte, mh multihash.Multihash) (*model.FindResponse, error) {

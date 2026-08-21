@@ -56,7 +56,8 @@ func TestResultsFromFindResponseAndBack(t *testing.T) {
 		},
 	}
 
-	results := resultsFromFindResponse(resp)
+	results, skipped := resultsFromFindResponse(resp, decoded.Hash())
+	require.Zero(t, skipped)
 	require.Len(t, results, 2)
 	require.True(t, usableResult(results[0]))
 	require.True(t, usableResult(results[1]))
@@ -78,6 +79,49 @@ func TestResultsFromFindResponseAndBack(t *testing.T) {
 	require.Equal(t, pr.Provider.ID, got.MultihashResults[0].ProviderResults[0].Provider.ID)
 	require.Len(t, got.EncryptedMultihashResults, 1)
 	require.Equal(t, encKey, got.EncryptedMultihashResults[0].EncryptedValueKeys[0])
+}
+
+func TestResultsFromFindResponseSkipsUnexpectedMultihash(t *testing.T) {
+	decoded, err := cid.Decode(testFindCID)
+	require.NoError(t, err)
+	other, err := cid.Decode("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG")
+	require.NoError(t, err)
+
+	matching := testProviderResult(t)
+	otherPR := matching
+	otherPR.ContextID = []byte("other")
+
+	resp := &model.FindResponse{
+		MultihashResults: []model.MultihashResult{
+			{
+				Multihash:       other.Hash(),
+				ProviderResults: []model.ProviderResult{otherPR},
+			},
+			{
+				Multihash:       decoded.Hash(),
+				ProviderResults: []model.ProviderResult{matching},
+			},
+			{
+				ProviderResults: []model.ProviderResult{matching},
+			},
+		},
+		EncryptedMultihashResults: []model.EncryptedMultihashResult{
+			{
+				Multihash:          other.Hash(),
+				EncryptedValueKeys: [][]byte{{0xaa}},
+			},
+			{
+				Multihash:          decoded.Hash(),
+				EncryptedValueKeys: [][]byte{{0xbb}},
+			},
+		},
+	}
+
+	results, skipped := resultsFromFindResponse(resp, decoded.Hash())
+	require.Equal(t, 3, skipped)
+	require.Len(t, results, 2)
+	require.Equal(t, matching.ContextID, results[0].ContextID)
+	require.Equal(t, []byte{0xbb}, results[1].EncryptedValueKey)
 }
 
 func TestDecodeBackendFindResponseJSONWithCharset(t *testing.T) {

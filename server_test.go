@@ -258,6 +258,52 @@ func (s *serverTestSuite) TestFindCIDConvertsBackendJSONToNDJSON() {
 	require.Equal(t, testProviderAddr, result.Provider.Addrs[0].String())
 }
 
+func (s *serverTestSuite) TestFindCIDDropsBackendJSONForUnexpectedMultihash() {
+	t := s.T()
+
+	other, err := cid.Decode("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG")
+	require.NoError(t, err)
+
+	s.backendHandler = func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, `/cid/`+testFindCID, r.URL.Path)
+		require.Equal(t, r.Header.Get("Accept"), "application/x-ndjson")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		writeOneLineJSON(t, w, `
+			{
+				"MultihashResults": [{
+					"Multihash": %[1]q,
+					"ProviderResults": [{
+						"ContextID": "Y3R4MQ==",
+						"Metadata": "gBI=",
+						"Provider": {
+							"ID": %[2]q,
+							"Addrs": [%[3]q]
+						}
+					}]
+				}]
+			}`,
+			base64.StdEncoding.EncodeToString(other.Hash()), // %[1]
+			testProviderID,   // %[2]
+			testProviderAddr, // %[3]
+		)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("http://%s/cid/%s", s.srvListener.Addr(), testFindCID),
+		nil,
+	)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/x-ndjson")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func (s *serverTestSuite) TestFindCIDConvertsBackendNDJSONToJSON() {
 	t := s.T()
 

@@ -178,6 +178,7 @@ func ReportFindBackendMetrics(
 	duration time.Duration,
 	validEntriesCount int,
 	malformedEntriesCount int,
+	unexpectedMultihashCount int,
 ) {
 	FindBackendLatency.WithLabelValues(
 		backend,
@@ -204,6 +205,15 @@ func ReportFindBackendMetrics(
 			yesno(isStreaming),
 			"malformed",
 		).Add(float64(malformedEntriesCount))
+	}
+
+	if unexpectedMultihashCount > 0 {
+		FindBackendEntriesFetched.WithLabelValues(
+			backend,
+			method,
+			yesno(isStreaming),
+			"unexpected_multihash",
+		).Add(float64(unexpectedMultihashCount))
 	}
 }
 
