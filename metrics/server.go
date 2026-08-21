@@ -31,15 +31,16 @@ const (
 type ErrKind struct{ string }
 
 var (
-	ErrKindNone            = ErrKind{"none"}
-	ErrKindRequestCanceled = ErrKind{"request_canceled"}
-	ErrKindRequestDeadline = ErrKind{"request_deadline_exceeded"}
-	ErrKindRequestFailed   = ErrKind{"request_failed"}
-	ErrKindReadCanceled    = ErrKind{"read_canceled"}
-	ErrKindReadDeadline    = ErrKind{"read_deadline_exceeded"}
-	ErrKindReadFailed      = ErrKind{"read_failed"}
-	ErrKindUnmarshalFailed = ErrKind{"unmarshal_failed"}
-	ErrKindNotFound        = ErrKind{"not_found"}
+	ErrKindNone               = ErrKind{"none"}
+	ErrKindRequestCanceled    = ErrKind{"request_canceled"}
+	ErrKindRequestDeadline    = ErrKind{"request_deadline_exceeded"}
+	ErrKindRequestFailed      = ErrKind{"request_failed"}
+	ErrKindReadCanceled       = ErrKind{"read_canceled"}
+	ErrKindReadDeadline       = ErrKind{"read_deadline_exceeded"}
+	ErrKindReadFailed         = ErrKind{"read_failed"}
+	ErrKindUnmarshalFailed    = ErrKind{"unmarshal_failed"}
+	ErrKindInvalidContentType = ErrKind{"invalid_content_type"}
+	ErrKindNotFound           = ErrKind{"not_found"}
 )
 
 func ErrKindHttpStatus(statusCode int) ErrKind {
@@ -177,6 +178,7 @@ func ReportFindBackendMetrics(
 	duration time.Duration,
 	validEntriesCount int,
 	malformedEntriesCount int,
+	unexpectedMultihashCount int,
 ) {
 	FindBackendLatency.WithLabelValues(
 		backend,
@@ -203,6 +205,15 @@ func ReportFindBackendMetrics(
 			yesno(isStreaming),
 			"malformed",
 		).Add(float64(malformedEntriesCount))
+	}
+
+	if unexpectedMultihashCount > 0 {
+		FindBackendEntriesFetched.WithLabelValues(
+			backend,
+			method,
+			yesno(isStreaming),
+			"unexpected_multihash",
+		).Add(float64(unexpectedMultihashCount))
 	}
 }
 

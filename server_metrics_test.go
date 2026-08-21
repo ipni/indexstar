@@ -81,3 +81,41 @@ func readTopProviderMetrics(t *testing.T) map[string]float64 {
 
 	return values
 }
+
+func readFindBackendEntriesFetched(t *testing.T, backendHost string) (valid, malformed, unexpected float64) {
+	t.Helper()
+
+	ch := make(chan prometheus.Metric, 256)
+	metrics.FindBackendEntriesFetched.Collect(ch)
+	close(ch)
+
+	for metric := range ch {
+		pb := &dto.Metric{}
+		require.NoError(t, metric.Write(pb))
+		require.NotNil(t, pb.Counter)
+
+		var backend, errKind string
+		for _, label := range pb.Label {
+			switch label.GetName() {
+			case metrics.LabelBackend:
+				backend = label.GetValue()
+			case metrics.LabelErrKind:
+				errKind = label.GetValue()
+			}
+		}
+		if backend != backendHost {
+			continue
+		}
+
+		value := pb.Counter.GetValue()
+		switch errKind {
+		case "":
+			valid += value
+		case "malformed":
+			malformed += value
+		case "unexpected_multihash":
+			unexpected += value
+		}
+	}
+	return valid, malformed, unexpected
+}

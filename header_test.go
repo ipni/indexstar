@@ -84,3 +84,24 @@ func Test_getAccepts(t *testing.T) {
 		})
 	}
 }
+
+func Test_mediaTypeFromContentType(t *testing.T) {
+	const fallback = "application/fallback"
+	tests := []struct {
+		name  string
+		given string
+		want  string
+	}{
+		{name: "empty", want: fallback},
+		{name: "json", given: "application/json", want: mediaTypeJson},
+		{name: "json charset", given: "application/json; charset=utf-8", want: mediaTypeJson},
+		{name: "json charset no space", given: "application/json;charset=utf-8", want: mediaTypeJson},
+		{name: "ndjson", given: "application/x-ndjson", want: mediaTypeNDJson},
+		{name: "invalid", given: ";;;;", want: fallback},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, mediaTypeFromContentType(tt.given, fallback))
+		})
+	}
+}

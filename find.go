@@ -260,6 +260,7 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 				time.Since(start),
 				entriesCount,
 				0,
+				0,
 			)
 		}
 
@@ -306,8 +307,17 @@ func (s *server) doFind(ctx context.Context, method, source string, reqURL *url.
 		switch resp.StatusCode {
 		case http.StatusOK:
 			atomic.AddInt32(&count, 1)
-			providers, err := model.UnmarshalFindResponse(data)
+			providers, err := decodeBackendFindResponse(data, resp.Header.Get("Content-Type"), reqURL.Path)
 			if err != nil {
+				if errors.Is(err, errUnsupportedContentType) {
+					backendMetrics(0, metrics.ErrKindInvalidContentType)
+					log.Debugw(
+						"unsupported backend content type",
+						"respContentType", resp.Header.Get("Content-Type"),
+						"err", err,
+					)
+					return nil, nil
+				}
 				backendMetrics(0, metrics.ErrKindUnmarshalFailed)
 				return nil, circuitbreaker.MarkAsSuccess(err)
 			}
