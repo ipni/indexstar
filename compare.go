@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"path"
@@ -49,6 +50,22 @@ type sfSf2Cmp struct {
 	finished sync.Once
 }
 
+// providerDelta is the per-provider entry count on each site, recorded only
+// when the two disagree. A zero on either side means the provider was absent
+// from that site entirely.
+type providerDelta struct {
+	id  peer.ID
+	sf  int
+	sf2 int
+}
+
+func (p providerDelta) shortSite() (string, int) {
+	if p.sf2 < p.sf {
+		return siteSf2, p.sf - p.sf2
+	}
+	return siteSf, p.sf2 - p.sf
+}
+
 type sfSf2Diff struct {
 	incomplete bool
 	equal      bool
@@ -60,6 +77,11 @@ type sfSf2Diff struct {
 
 	onlySf  []peer.ID
 	onlySf2 []peer.ID
+
+	// deltas covers every provider whose entry counts differ, which is what
+	// distinguishes "sf2 never ingested this provider" from "sf2 is missing
+	// some of this provider's ads".
+	deltas []providerDelta
 
 	exclusiveSfEntries  int
 	exclusiveSf2Entries int
@@ -184,30 +206,41 @@ func (c *sfSf2Cmp) diff() sfSf2Diff {
 	if den == 0 {
 		d.ratio = 0
 	} else {
-		diff := d.sfEntries - d.sf2Entries
-		if diff < 0 {
-			diff = -diff
-		}
-		d.ratio = float64(diff) / float64(den)
+		d.ratio = float64(abs(d.sfEntries-d.sf2Entries)) / float64(den)
 	}
 	d.largeDiff = d.ratio > largeEntryDiffRatio
 
 	for pid, n := range c.sfBag.providers {
-		if _, ok := c.s2Bag.providers[pid]; !ok {
+		n2, both := c.s2Bag.providers[pid]
+		if !both {
 			d.onlySf = append(d.onlySf, pid)
 			d.exclusiveSfEntries += n
 		}
+		if n != n2 {
+			d.deltas = append(d.deltas, providerDelta{id: pid, sf: n, sf2: n2})
+		}
 	}
 	for pid, n := range c.s2Bag.providers {
-		if _, ok := c.sfBag.providers[pid]; !ok {
+		if _, both := c.sfBag.providers[pid]; !both {
 			d.onlySf2 = append(d.onlySf2, pid)
 			d.exclusiveSf2Entries += n
+			d.deltas = append(d.deltas, providerDelta{id: pid, sf2: n})
 		}
 	}
 	slices.Sort(d.onlySf)
 	slices.Sort(d.onlySf2)
+	// Biggest offenders first so that a clipped sample log shows the providers
+	// that actually account for the difference.
+	slices.SortFunc(d.deltas, func(a, b providerDelta) int {
+		if n := cmp.Compare(abs(b.sf-b.sf2), abs(a.sf-a.sf2)); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.id, b.id)
+	})
 
-	d.equal = d.sfEntries == d.sf2Entries && len(d.onlySf) == 0 && len(d.onlySf2) == 0
+	// deltas subsumes the exclusive lists, and also catches the case where the
+	// totals happen to match but the per-provider counts do not.
+	d.equal = d.sfEntries == d.sf2Entries && len(d.deltas) == 0
 	return d
 }
 
@@ -246,6 +279,10 @@ func reportSfSf2Diff(reqPath string, d sfSf2Diff) {
 	for _, pid := range d.onlySf2 {
 		metrics.ReportSfSf2ExclusiveProvider(siteSf2, pid.String())
 	}
+	for _, pd := range d.deltas {
+		site, missing := pd.shortSite()
+		metrics.ReportSfSf2ProviderShort(site, pd.id.String(), missing)
+	}
 
 	if d.largeDiff {
 		maybeLogSample(reqPath, d)
@@ -271,19 +308,27 @@ func maybeLogSample(reqPath string, d sfSf2Diff) {
 		"sfEntries", d.sfEntries,
 		"sf2Entries", d.sf2Entries,
 		"ratio", d.ratio,
-		"onlySf", clipProviders(d.onlySf),
-		"onlySf2", clipProviders(d.onlySf2),
+		"providers", clipDeltas(d.deltas),
 	)
 }
 
-func clipProviders(ids []peer.ID) []string {
-	n := min(len(ids), maxLoggedProviders)
+// clipDeltas renders the providers accounting for the difference as
+// "<peerID> sf=<n> sf2=<n>", most divergent first.
+func clipDeltas(deltas []providerDelta) []string {
+	n := min(len(deltas), maxLoggedProviders)
 	clipped := make([]string, 0, n+1)
-	for _, id := range ids[:n] {
-		clipped = append(clipped, id.String())
+	for _, pd := range deltas[:n] {
+		clipped = append(clipped, fmt.Sprintf("%s sf=%d sf2=%d", pd.id, pd.sf, pd.sf2))
 	}
-	if len(ids) > n {
-		clipped = append(clipped, fmt.Sprintf("...+%d", len(ids)-n))
+	if len(deltas) > n {
+		clipped = append(clipped, fmt.Sprintf("...+%d", len(deltas)-n))
 	}
 	return clipped
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

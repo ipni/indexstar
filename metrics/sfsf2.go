@@ -58,6 +58,20 @@ var (
 		},
 		[]string{LabelSite, LabelProvider},
 	)
+	SfSf2ProviderShort = promAuto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "indexstar_sfsf2_provider_short_total",
+			Help: "Finds where a site returned fewer entries than the other for a given provider (throw-away)",
+		},
+		[]string{LabelSite, LabelProvider},
+	)
+	SfSf2ProviderShortEntries = promAuto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "indexstar_sfsf2_provider_short_entries_total",
+			Help: "Entries a site was missing relative to the other for a given provider (throw-away)",
+		},
+		[]string{LabelSite, LabelProvider},
+	)
 )
 
 func ReportSfSf2Compare(
@@ -87,4 +101,11 @@ func ReportSfSf2Compare(
 
 func ReportSfSf2ExclusiveProvider(site, provider string) {
 	SfSf2ExclusiveProvider.WithLabelValues(site, provider).Inc()
+}
+
+// ReportSfSf2ProviderShort records that site returned missing fewer entries
+// than the other site did for provider.
+func ReportSfSf2ProviderShort(site, provider string, missing int) {
+	SfSf2ProviderShort.WithLabelValues(site, provider).Inc()
+	SfSf2ProviderShortEntries.WithLabelValues(site, provider).Add(float64(missing))
 }
