@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"path"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,9 @@ import (
 // Compares responses from backends classified as sf vs sf2 on every find
 // request. Emits discrepancy metrics, and logs sample CIDs whose entry counts
 // differ by more than 20% (at most once per 15s).
+//
+// All comparison entry points recover from panics so this cannot take down
+// indexstar. finish() reports in a background goroutine.
 
 const (
 	siteSf  = "sf"
@@ -27,6 +31,7 @@ const (
 
 	largeEntryDiffRatio = 0.20
 	sampleLogInterval   = 15 * time.Second
+	panicLogInterval    = time.Second
 	maxLoggedProviders  = 8
 )
 
@@ -59,7 +64,8 @@ type providerDelta struct {
 	sf2 int
 }
 
-func (p providerDelta) shortSite() (string, int) {
+func (p providerDelta) shortSite() (site string, missing int) {
+	defer recoverCmp("shortSite")
 	if p.sf2 < p.sf {
 		return siteSf2, p.sf - p.sf2
 	}
@@ -87,9 +93,36 @@ type sfSf2Diff struct {
 	exclusiveSf2Entries int
 }
 
-var lastSampleLog atomic.Int64
+var (
+	lastSampleLog atomic.Int64
+	lastPanicLog  atomic.Int64
+)
+
+// recoverCmp swallows panics from comparison code so that this throw-away
+// instrumentation cannot crash indexstar. Logs at most once per second.
+func recoverCmp(method string) {
+	p := recover()
+	if p == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	last := lastPanicLog.Load()
+	if now-last < int64(panicLogInterval) {
+		return
+	}
+	if !lastPanicLog.CompareAndSwap(last, now) {
+		return
+	}
+	log.Errorw(
+		"sf/sf2 comparison panic",
+		"method", method,
+		"panic", p,
+		"stack", string(debug.Stack()),
+	)
+}
 
 func newSfSf2Cmp(reqPath string, backends []Backend) *sfSf2Cmp {
+	defer recoverCmp("newSfSf2Cmp")
 	var local, sf, sf2 Backend
 	for _, b := range backends {
 		if b == nil || b.URL() == nil {
@@ -136,6 +169,7 @@ func newSfSf2Cmp(reqPath string, backends []Backend) *sfSf2Cmp {
 }
 
 func (c *sfSf2Cmp) bag(b Backend) *siteBag {
+	defer recoverCmp("bag")
 	if c == nil {
 		return nil
 	}
@@ -149,6 +183,7 @@ func (c *sfSf2Cmp) bag(b Backend) *siteBag {
 }
 
 func (c *sfSf2Cmp) addResult(b Backend, r *encryptedOrPlainResult) {
+	defer recoverCmp("addResult")
 	bag := c.bag(b)
 	if bag == nil {
 		return
@@ -160,6 +195,7 @@ func (c *sfSf2Cmp) addResult(b Backend, r *encryptedOrPlainResult) {
 }
 
 func (c *sfSf2Cmp) addFindResponse(b Backend, resp *model.FindResponse) {
+	defer recoverCmp("addFindResponse")
 	bag := c.bag(b)
 	if bag == nil {
 		return
@@ -182,6 +218,7 @@ func (c *sfSf2Cmp) addFindResponse(b Backend, resp *model.FindResponse) {
 }
 
 func (c *sfSf2Cmp) done(b Backend) {
+	defer recoverCmp("done")
 	bag := c.bag(b)
 	if bag == nil {
 		return
@@ -189,49 +226,50 @@ func (c *sfSf2Cmp) done(b Backend) {
 	bag.done = true
 }
 
-func (c *sfSf2Cmp) diff() sfSf2Diff {
+func (c *sfSf2Cmp) diff() (d sfSf2Diff) {
+	defer recoverCmp("diff")
+	d.incomplete = true
 	if c == nil {
-		return sfSf2Diff{incomplete: true}
+		return
 	}
-
 	if !c.sfBag.done || !c.s2Bag.done {
-		return sfSf2Diff{incomplete: true}
+		return
 	}
 
-	d := sfSf2Diff{
+	out := sfSf2Diff{
 		sfEntries:  c.sfBag.entries,
 		sf2Entries: c.s2Bag.entries,
 	}
-	den := max(d.sfEntries, d.sf2Entries)
+	den := max(out.sfEntries, out.sf2Entries)
 	if den == 0 {
-		d.ratio = 0
+		out.ratio = 0
 	} else {
-		d.ratio = float64(abs(d.sfEntries-d.sf2Entries)) / float64(den)
+		out.ratio = float64(abs(out.sfEntries-out.sf2Entries)) / float64(den)
 	}
-	d.largeDiff = d.ratio > largeEntryDiffRatio
+	out.largeDiff = out.ratio > largeEntryDiffRatio
 
 	for pid, n := range c.sfBag.providers {
 		n2, both := c.s2Bag.providers[pid]
 		if !both {
-			d.onlySf = append(d.onlySf, pid)
-			d.exclusiveSfEntries += n
+			out.onlySf = append(out.onlySf, pid)
+			out.exclusiveSfEntries += n
 		}
 		if n != n2 {
-			d.deltas = append(d.deltas, providerDelta{id: pid, sf: n, sf2: n2})
+			out.deltas = append(out.deltas, providerDelta{id: pid, sf: n, sf2: n2})
 		}
 	}
 	for pid, n := range c.s2Bag.providers {
 		if _, both := c.sfBag.providers[pid]; !both {
-			d.onlySf2 = append(d.onlySf2, pid)
-			d.exclusiveSf2Entries += n
-			d.deltas = append(d.deltas, providerDelta{id: pid, sf2: n})
+			out.onlySf2 = append(out.onlySf2, pid)
+			out.exclusiveSf2Entries += n
+			out.deltas = append(out.deltas, providerDelta{id: pid, sf2: n})
 		}
 	}
-	slices.Sort(d.onlySf)
-	slices.Sort(d.onlySf2)
+	slices.Sort(out.onlySf)
+	slices.Sort(out.onlySf2)
 	// Biggest offenders first so that a clipped sample log shows the providers
 	// that actually account for the difference.
-	slices.SortFunc(d.deltas, func(a, b providerDelta) int {
+	slices.SortFunc(out.deltas, func(a, b providerDelta) int {
 		if n := cmp.Compare(abs(b.sf-b.sf2), abs(a.sf-a.sf2)); n != 0 {
 			return n
 		}
@@ -240,20 +278,26 @@ func (c *sfSf2Cmp) diff() sfSf2Diff {
 
 	// deltas subsumes the exclusive lists, and also catches the case where the
 	// totals happen to match but the per-provider counts do not.
-	d.equal = d.sfEntries == d.sf2Entries && len(d.deltas) == 0
-	return d
+	out.equal = out.sfEntries == out.sf2Entries && len(out.deltas) == 0
+	d = out
+	return
 }
 
 func (c *sfSf2Cmp) finish() {
+	defer recoverCmp("finish")
 	if c == nil {
 		return
 	}
 	c.finished.Do(func() {
-		reportSfSf2Diff(c.path, c.diff())
+		go func() {
+			defer recoverCmp("finish.report")
+			reportSfSf2Diff(c.path, c.diff())
+		}()
 	})
 }
 
 func reportSfSf2Diff(reqPath string, d sfSf2Diff) {
+	defer recoverCmp("reportSfSf2Diff")
 	if d.incomplete {
 		metrics.ReportSfSf2Compare(metrics.SfSf2OutcomeIncomplete, 0, 0, 0, false, 0, 0)
 		return
@@ -290,6 +334,7 @@ func reportSfSf2Diff(reqPath string, d sfSf2Diff) {
 }
 
 func maybeLogSample(reqPath string, d sfSf2Diff) {
+	defer recoverCmp("maybeLogSample")
 	now := time.Now().UnixNano()
 	last := lastSampleLog.Load()
 	if now-last < int64(sampleLogInterval) {
@@ -315,6 +360,7 @@ func maybeLogSample(reqPath string, d sfSf2Diff) {
 // clipDeltas renders the providers accounting for the difference as
 // "<peerID> sf=<n> sf2=<n>", most divergent first.
 func clipDeltas(deltas []providerDelta) []string {
+	defer recoverCmp("clipDeltas")
 	n := min(len(deltas), maxLoggedProviders)
 	clipped := make([]string, 0, n+1)
 	for _, pd := range deltas[:n] {
