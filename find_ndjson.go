@@ -198,6 +198,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 	resultsChan := make(chan *resultWithBackend, 1)
 	var backendsCount atomic.Int32
 	var totalResultsCount atomic.Int32
+	cmp := newSfSf2Cmp(reqURL.Path, s.backends)
 	if err := sg.scatter(ctx, func(cctx context.Context, b Backend) (*any, error) {
 		// forward double hashed requests to double hashed backends only and regular requests to regular backends
 		_, isDhBackend := b.(dhBackend)
@@ -272,6 +273,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			measureBackendLatency(metrics.ErrKindNotFound)
 			io.Copy(io.Discard, resp.Body)
 			backendsCount.Add(1)
+			cmp.done(b)
 			log.Debugw("not found response", "url", req.URL.String())
 			return nil, nil
 
@@ -350,6 +352,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 				}
 
 				validBackendEntriesCount++
+				cmp.addResult(b, result)
 				select {
 				case <-cctx.Done():
 					return nil, nil
@@ -359,6 +362,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 			}
 
 			measureBackendLatency(metrics.ErrKindNone)
+			cmp.done(b)
 			log.Debugw(
 				"Finished processing JSON results from backend",
 				"providersCount", validBackendEntriesCount,
@@ -402,6 +406,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 						}
 
 						validBackendEntriesCount++
+						cmp.addResult(b, &result)
 
 						select {
 						case <-cctx.Done():
@@ -427,6 +432,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 					}
 
 					measureBackendLatency(metrics.ErrKindNone)
+					cmp.done(b)
 					log.Debugw(
 						"Finished processing NDJSON results from backend",
 						"providersCount", validBackendEntriesCount,
@@ -456,6 +462,7 @@ func (s *server) fetchUpstreamNDJsonResponses(
 		sg.wg.Wait()
 
 		close(resultsChan)
+		cmp.finish()
 
 		metrics.FindBackends.Set(float64(backendsCount.Load()))
 
