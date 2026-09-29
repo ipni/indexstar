@@ -5,8 +5,8 @@ go 1.26.0
 require (
 	github.com/ipfs/go-cid v0.6.2
 	github.com/ipfs/go-log/v2 v2.9.2
-	github.com/ipni/go-libipni v0.8.2
-	github.com/libp2p/go-libp2p v0.49.0
+	github.com/ipni/go-libipni v0.9.0
+	github.com/libp2p/go-libp2p v0.50.0
 	github.com/mercari/go-circuitbreaker v0.0.2
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multicodec v0.10.0
