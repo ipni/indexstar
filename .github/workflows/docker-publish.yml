@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'main'
+      - 'sf-sf2-comparison'
     tags:
       - 'v*'
   workflow_run:
