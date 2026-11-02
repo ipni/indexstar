@@ -358,7 +358,7 @@ func (s *server) Serve() <-chan error {
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", metrics.WithMetrics())
-	metricsMux.Handle("/pprof", metrics.WithProfile())
+	metricsMux.Handle("/debug/pprof/", metrics.WithProfile())
 	metricsServ := http.Server{
 		Handler: http.MaxBytesHandler(metricsMux, config.Server.MaxRequestBodySize),
 	}
