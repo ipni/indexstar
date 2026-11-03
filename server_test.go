@@ -863,3 +863,38 @@ func (s *serverTestSuite) TestDelegatedRoutingResponseHeaders() {
 		})
 	}
 }
+
+func (s *serverTestSuite) TestMetricsServerEndpoints() {
+	for _, dd := range []struct {
+		Path         string
+		ExpectNoBody bool
+	}{
+		{Path: "/metrics"},
+		{Path: "/debug/pprof/"},
+		{Path: "/debug/pprof/allocs"},
+		{Path: "/debug/pprof/block"},
+		{Path: "/debug/pprof/goroutine"},
+		{Path: "/debug/pprof/heap"},
+		{Path: "/debug/pprof/mutex"},
+		{Path: "/debug/pprof/threadcreate"},
+		{Path: "/debug/pprof/cmdline"},
+		{Path: "/debug/pprof/symbol"},
+		{Path: "/debug/pprof/profile?seconds=1"},
+		{Path: "/debug/pprof/trace?seconds=1"},
+		{Path: "/debug/pprof/gc", ExpectNoBody: true},
+	} {
+		s.Run(dd.Path, func() {
+			t := s.T()
+
+			resp, err := http.Get("http://" + s.metricsListener.Addr().String() + dd.Path)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, dd.ExpectNoBody, len(body) == 0)
+		})
+	}
+}
