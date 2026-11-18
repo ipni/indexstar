@@ -15,10 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeSource is a provider source whose FetchAll fails for its first failures
-// calls
+// fakeSource is a provider source whose FetchAll takes delay and fails for
+// its first failures calls
 type fakeSource struct {
 	name     string
+	delay    time.Duration
 	failures int32
 	fetches  atomic.Int32
 }
@@ -28,6 +29,7 @@ func (f *fakeSource) Fetch(context.Context, peer.ID) (*model.ProviderInfo, error
 }
 
 func (f *fakeSource) FetchAll(context.Context) ([]*model.ProviderInfo, error) {
+	time.Sleep(f.delay)
 	if f.fetches.Add(1) <= f.failures {
 		return nil, errors.New("backend unreachable")
 	}
@@ -65,6 +67,29 @@ func TestCheckProviderBackendsFailsAfterAttempts(t *testing.T) {
 		require.Equal(t, 2*retry, time.Since(start))
 		require.EqualValues(t, 1, up.fetches.Load())
 		require.EqualValues(t, 3, down.fetches.Load())
+	})
+}
+
+func TestCheckProviderBackendsFetchesConcurrently(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			retry   = 5 * time.Second
+			timeout = 30 * time.Second
+		)
+		down1 := &fakeSource{name: "down1", delay: timeout, failures: 100}
+		down2 := &fakeSource{name: "down2", delay: timeout, failures: 100}
+		up := &fakeSource{name: "up", delay: timeout}
+
+		// Each attempt takes as long as the slowest backend, not the sum of
+		// all backends.
+		start := time.Now()
+		err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down1, up, down2}, 3, retry)
+		require.ErrorContains(t, err, "down1: backend unreachable")
+		require.ErrorContains(t, err, "down2: backend unreachable")
+		require.Equal(t, 3*timeout+2*retry, time.Since(start))
+		require.EqualValues(t, 3, down1.fetches.Load())
+		require.EqualValues(t, 3, down2.fetches.Load())
+		require.EqualValues(t, 1, up.fetches.Load())
 	})
 }
 

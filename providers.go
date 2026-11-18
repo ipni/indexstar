@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/ipni/go-libipni/pcache"
@@ -14,20 +15,31 @@ import (
 )
 
 // checkProviderBackends fetches the provider list from every providers backend
-// before the provider cache is created. A backend that fails is retried after
-// the retry interval, up to maxAttempts attempts in total. It returns an
-// error naming each backend that still fails, so that the server does not
-// start with providers missing from its cache.
+// before the provider cache is created. The backends are fetched concurrently.
+// A backend that fails is retried after the retry interval, up to maxAttempts
+// attempts in total. It returns an error naming each backend that still fails,
+// so that the server does not start with providers missing from its cache.
 func checkProviderBackends(ctx context.Context, sources []pcache.ProviderSource, maxAttempts int, retry time.Duration) error {
 	maxAttempts = max(maxAttempts, 1)
 	pending := sources
 	for attempt := 1; ; attempt++ {
+		// Fetch from the pending backends concurrently, so that an attempt
+		// takes as long as the slowest backend
+		fetchErrs := make([]error, len(pending))
+		var wg sync.WaitGroup
+		for i, src := range pending {
+			wg.Go(func() {
+				_, fetchErrs[i] = src.FetchAll(ctx)
+			})
+		}
+		wg.Wait()
+
 		var failed []pcache.ProviderSource
 		var errs []error
-		for _, src := range pending {
-			if _, err := src.FetchAll(ctx); err != nil {
-				failed = append(failed, src)
-				errs = append(errs, fmt.Errorf("%s: %w", src, err))
+		for i, err := range fetchErrs {
+			if err != nil {
+				failed = append(failed, pending[i])
+				errs = append(errs, fmt.Errorf("%s: %w", pending[i], err))
 			}
 		}
 		if len(failed) == 0 {
