@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
@@ -122,16 +123,21 @@ func TestNewServerFailsWhenProvidersBackendIsDown(t *testing.T) {
 	config.Server.PcacheStartupMaxAttempts = 2
 	config.Server.PcacheStartupRetry = time.Millisecond
 
-	down := httptest.NewServer(nil)
-	downURL := down.URL
-	down.Close()
+	// The providers backend is up but answers every request with an error
+	var requests atomic.Int32
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
 
 	err := runApp(t.Context(), []string{"indexstar",
 		"--listen", "127.0.0.1:0",
 		"--metrics", "127.0.0.1:0",
 		"--backends", "http://127.0.0.1:1/",
-		"--providersBackends", downURL,
+		"--providersBackends", down.URL,
 	}, nil, 0, NewServer)
 	require.ErrorContains(t, err, "cannot fetch providers after 2 attempts")
-	require.ErrorContains(t, err, downURL)
+	require.ErrorContains(t, err, down.URL)
+	require.EqualValues(t, 2, requests.Load())
 }
