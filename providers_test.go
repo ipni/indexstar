@@ -141,3 +141,38 @@ func TestNewServerFailsWhenProvidersBackendIsDown(t *testing.T) {
 	require.ErrorContains(t, err, down.URL)
 	require.EqualValues(t, 2, requests.Load())
 }
+
+// An empty provider list is a successful answer; an error status or a body that
+// is not a provider list is a failure
+func TestCheckProviderBackendsHTTPResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		wantErr bool
+	}{
+		{name: "empty list", status: http.StatusOK, body: `[]`},
+		{name: "null list", status: http.StatusOK, body: `null`},
+		{name: "providers", status: http.StatusOK, body: `[{"AddrInfo":{"ID":"12D3KooWNSRG5wTShNu6EXCPTkoH7dWsphKAPrbvQchHa5arfsDC","Addrs":[]}}]`},
+		{name: "not found", status: http.StatusNotFound, wantErr: true},
+		{name: "server error", status: http.StatusInternalServerError, wantErr: true},
+		{name: "invalid json", status: http.StatusOK, body: `{`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(backend.Close)
+			src, err := pcache.NewHTTPSource(backend.URL, backend.Client())
+			require.NoError(t, err)
+
+			err = checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, time.Millisecond)
+			if tc.wantErr {
+				require.ErrorContains(t, err, backend.URL)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
