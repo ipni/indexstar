@@ -49,7 +49,7 @@ func checkProviderBackends(ctx context.Context, sources []pcache.ProviderSource,
 
 		if attempt == maxAttempts {
 			return fmt.Errorf(
-				"cannot fetch providers after %d attempts: %w",
+				"cannot fetch providers (attempts: %d): %w",
 				maxAttempts, errors.Join(errs...),
 			)
 		}

@@ -62,7 +62,7 @@ func TestCheckProviderBackendsFailsAfterAttempts(t *testing.T) {
 
 		start := time.Now()
 		err := checkProviderBackends(t.Context(), []pcache.ProviderSource{up, down}, 3, retry)
-		require.ErrorContains(t, err, "after 3 attempts")
+		require.ErrorContains(t, err, "(attempts: 3)")
 		require.ErrorContains(t, err, "http://down/providers: backend unreachable")
 		require.NotContains(t, err.Error(), "up:")
 		require.Equal(t, 2*retry, time.Since(start))
@@ -97,7 +97,7 @@ func TestCheckProviderBackendsFetchesConcurrently(t *testing.T) {
 func TestCheckProviderBackendsAtLeastOneAttempt(t *testing.T) {
 	down := &fakeSource{name: "down", failures: 100}
 	err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 0, time.Hour)
-	require.ErrorContains(t, err, "after 1 attempts")
+	require.ErrorContains(t, err, "(attempts: 1)")
 	require.EqualValues(t, 1, down.fetches.Load())
 }
 
@@ -137,7 +137,7 @@ func TestNewServerFailsWhenProvidersBackendIsDown(t *testing.T) {
 		"--backends", "http://127.0.0.1:1/",
 		"--providersBackends", down.URL,
 	}, nil, 0, NewServer)
-	require.ErrorContains(t, err, "cannot fetch providers after 2 attempts")
+	require.ErrorContains(t, err, "cannot fetch providers (attempts: 2)")
 	require.ErrorContains(t, err, down.URL)
 	require.EqualValues(t, 2, requests.Load())
 }
