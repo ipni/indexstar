@@ -148,6 +148,16 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 		providerSources = append(providerSources, httpSrc)
 	}
 
+	err = checkProviderBackends(
+		c.Context,
+		providerSources,
+		config.Server.PcacheStartupMaxAttempts,
+		config.Server.PcacheStartupRetry,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	pc, err := pcache.New(
 		pcache.WithSource(providerSources...),
 		pcache.WithRefreshInterval(config.Server.PcacheRefreshInterval),
