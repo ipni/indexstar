@@ -101,6 +101,20 @@ func TestCheckProviderBackendsAtLeastOneAttempt(t *testing.T) {
 	require.EqualValues(t, 1, down.fetches.Load())
 }
 
+func TestCheckProviderBackendsMinimumRetry(t *testing.T) {
+	for _, retry := range []time.Duration{0, -time.Second, time.Millisecond} {
+		synctest.Test(t, func(t *testing.T) {
+			down := &fakeSource{name: "down", failures: 100}
+
+			start := time.Now()
+			err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 3, retry)
+			require.ErrorContains(t, err, "(attempts: 3)")
+			require.Equal(t, 2*minStartupRetry, time.Since(start))
+			require.EqualValues(t, 3, down.fetches.Load())
+		})
+	}
+}
+
 func TestCheckProviderBackendsStopsOnCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -121,7 +135,7 @@ func TestNewServerFailsWhenProvidersBackendIsDown(t *testing.T) {
 	saved := config.Server
 	t.Cleanup(func() { config.Server = saved })
 	config.Server.PcacheStartupMaxAttempts = 2
-	config.Server.PcacheStartupRetry = time.Millisecond
+	config.Server.PcacheStartupRetry = minStartupRetry
 
 	// The providers backend is up but answers every request with an error
 	var requests atomic.Int32
@@ -167,7 +181,7 @@ func TestCheckProviderBackendsHTTPResponses(t *testing.T) {
 			src, err := pcache.NewHTTPSource(backend.URL, backend.Client())
 			require.NoError(t, err)
 
-			err = checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, time.Millisecond)
+			err = checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, minStartupRetry)
 			if tc.wantErr {
 				require.ErrorContains(t, err, backend.URL)
 			} else {
