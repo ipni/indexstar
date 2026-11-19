@@ -46,7 +46,7 @@ func TestCheckProviderBackendsRetriesFailedBackends(t *testing.T) {
 		flaky := &fakeSource{name: "flaky", failures: 2}
 
 		start := time.Now()
-		err := checkProviderBackends(t.Context(), []pcache.ProviderSource{up, flaky}, 3, retry)
+		_, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{up, flaky}, 3, retry)
 		require.NoError(t, err)
 		require.Equal(t, 2*retry, time.Since(start))
 		require.EqualValues(t, 1, up.fetches.Load())
@@ -61,7 +61,7 @@ func TestCheckProviderBackendsFailsAfterAttempts(t *testing.T) {
 		down := &fakeSource{name: "http://down/providers", failures: 100}
 
 		start := time.Now()
-		err := checkProviderBackends(t.Context(), []pcache.ProviderSource{up, down}, 3, retry)
+		_, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{up, down}, 3, retry)
 		require.ErrorContains(t, err, "(attempts: 3)")
 		require.ErrorContains(t, err, "http://down/providers: backend unreachable")
 		require.NotContains(t, err.Error(), "up:")
@@ -84,7 +84,7 @@ func TestCheckProviderBackendsFetchesConcurrently(t *testing.T) {
 		// Each attempt takes as long as the slowest backend, not the sum of
 		// all backends.
 		start := time.Now()
-		err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down1, up, down2}, 3, retry)
+		_, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down1, up, down2}, 3, retry)
 		require.ErrorContains(t, err, "down1: backend unreachable")
 		require.ErrorContains(t, err, "down2: backend unreachable")
 		require.Equal(t, 3*timeout+2*retry, time.Since(start))
@@ -96,7 +96,7 @@ func TestCheckProviderBackendsFetchesConcurrently(t *testing.T) {
 
 func TestCheckProviderBackendsAtLeastOneAttempt(t *testing.T) {
 	down := &fakeSource{name: "down", failures: 100}
-	err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 0, time.Hour)
+	_, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 0, time.Hour)
 	require.ErrorContains(t, err, "(attempts: 1)")
 	require.EqualValues(t, 1, down.fetches.Load())
 }
@@ -107,7 +107,7 @@ func TestCheckProviderBackendsMinimumRetry(t *testing.T) {
 			down := &fakeSource{name: "down", failures: 100}
 
 			start := time.Now()
-			err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 3, retry)
+			_, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{down}, 3, retry)
 			require.ErrorContains(t, err, "(attempts: 3)")
 			require.Equal(t, 2*minStartupRetry, time.Since(start))
 			require.EqualValues(t, 3, down.fetches.Load())
@@ -122,7 +122,8 @@ func TestCheckProviderBackendsStopsOnCancel(t *testing.T) {
 
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- checkProviderBackends(ctx, []pcache.ProviderSource{down}, 5, time.Hour)
+			_, err := checkProviderBackends(ctx, []pcache.ProviderSource{down}, 5, time.Hour)
+			errCh <- err
 		}()
 		synctest.Wait()
 		cancel()
@@ -181,7 +182,7 @@ func TestCheckProviderBackendsHTTPResponses(t *testing.T) {
 			src, err := pcache.NewHTTPSource(backend.URL, backend.Client())
 			require.NoError(t, err)
 
-			err = checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, minStartupRetry)
+			_, err = checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, minStartupRetry)
 			if tc.wantErr {
 				require.ErrorContains(t, err, backend.URL)
 			} else {
@@ -189,4 +190,39 @@ func TestCheckProviderBackendsHTTPResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The provider cache starts with the lists fetched by the check, without
+// fetching them again
+func TestCheckProviderBackendsPrefillsCache(t *testing.T) {
+	const pid = "12D3KooWNSRG5wTShNu6EXCPTkoH7dWsphKAPrbvQchHa5arfsDC"
+	// The backend answers the first request and fails every later one
+	var requests atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) > 1 {
+			http.Error(w, "", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"AddrInfo":{"ID":"` + pid + `","Addrs":[]}}]`))
+	}))
+	t.Cleanup(backend.Close)
+	src, err := pcache.NewHTTPSource(backend.URL, backend.Client())
+	require.NoError(t, err)
+
+	sources, err := checkProviderBackends(t.Context(), []pcache.ProviderSource{src}, 1, minStartupRetry)
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	require.Equal(t, src.String(), sources[0].String())
+
+	pc, err := pcache.New(pcache.WithSource(sources...), pcache.WithRefreshInterval(0))
+	require.NoError(t, err)
+	infos := pc.List()
+	require.Len(t, infos, 1)
+	require.Equal(t, pid, infos[0].AddrInfo.ID.String())
+	require.EqualValues(t, 1, requests.Load())
+
+	// Later fetches go to the backend
+	_, err = sources[0].FetchAll(t.Context())
+	require.ErrorContains(t, err, "503")
+	require.EqualValues(t, 2, requests.Load())
 }

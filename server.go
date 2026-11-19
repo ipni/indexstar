@@ -148,7 +148,7 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 		providerSources = append(providerSources, httpSrc)
 	}
 
-	err = checkProviderBackends(
+	providerSources, err = checkProviderBackends(
 		c.Context,
 		providerSources,
 		config.Server.PcacheStartupMaxAttempts,
