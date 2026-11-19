@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -225,4 +226,30 @@ func TestCheckProviderBackendsPrefillsCache(t *testing.T) {
 	_, err = sources[0].FetchAll(t.Context())
 	require.ErrorContains(t, err, "503")
 	require.EqualValues(t, 2, requests.Load())
+}
+
+// The providers backends are checked before the finder listener is bound
+func TestNewServerChecksProvidersBeforeListening(t *testing.T) {
+	saved := config.Server
+	t.Cleanup(func() { config.Server = saved })
+	config.Server.PcacheStartupMaxAttempts = 1
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
+
+	// Holding the listen address makes binding it fail, so the error shows
+	// which step ran first
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = held.Close() })
+
+	err = runApp(t.Context(), []string{"indexstar",
+		"--listen", held.Addr().String(),
+		"--metrics", "127.0.0.1:0",
+		"--backends", "http://127.0.0.1:1/",
+		"--providersBackends", down.URL,
+	}, nil, 0, NewServer)
+	require.ErrorContains(t, err, "cannot fetch providers (attempts: 1)")
 }
