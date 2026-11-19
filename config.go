@@ -17,6 +17,8 @@ const (
 	defaultServerDialerKeepAlive            = 15 * time.Second
 	defaultServerHttpClientTimeout          = 30 * time.Second
 	defaultPcacheRefreshInterval            = 30 * time.Second
+	defaultPcacheStartupMaxAttempts         = 5
+	defaultPcacheStartupRetry               = 5 * time.Second
 	defaultServerResultMaxWait              = 5 * time.Second
 	defaultServerResultStreamMaxWait        = 20 * time.Second
 	defaultServerMaxRequestBodySize  int64  = 8 << 10 // 8KiB
@@ -57,6 +59,8 @@ var config struct {
 		DialerKeepAlive           time.Duration
 		HttpClientTimeout         time.Duration
 		PcacheRefreshInterval     time.Duration
+		PcacheStartupMaxAttempts  int
+		PcacheStartupRetry        time.Duration
 		ResultMaxWait             time.Duration
 		ResultStreamMaxWait       time.Duration
 		MaxRequestBodySize        int64
@@ -90,6 +94,8 @@ func init() {
 	config.Server.DialerKeepAlive = getEnvOrDefault[time.Duration]("SERVER_DIALER_KEEP_ALIVE", defaultServerDialerKeepAlive)
 	config.Server.HttpClientTimeout = getEnvOrDefault[time.Duration]("SERVER_HTTP_CLIENT_TIMEOUT", defaultServerHttpClientTimeout)
 	config.Server.PcacheRefreshInterval = getEnvOrDefault[time.Duration]("SERVER_PCACHE_REFRESH_INTERVAL", defaultPcacheRefreshInterval)
+	config.Server.PcacheStartupMaxAttempts = getEnvOrDefault[int]("SERVER_PCACHE_STARTUP_ATTEMPTS", defaultPcacheStartupMaxAttempts)
+	config.Server.PcacheStartupRetry = getEnvOrDefault[time.Duration]("SERVER_PCACHE_STARTUP_RETRY_INTERVAL", defaultPcacheStartupRetry)
 	config.Server.ResultMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_MAX_WAIT", defaultServerResultMaxWait)
 	config.Server.ResultStreamMaxWait = getEnvOrDefault[time.Duration]("SERVER_RESULT_STREAM_MAX_WAIT", defaultServerResultStreamMaxWait)
 	config.Server.MaxRequestBodySize = getEnvOrDefault[int64]("SERVER_MAX_REQUEST_BODY_SIZE", defaultServerMaxRequestBodySize)

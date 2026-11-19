@@ -77,16 +77,6 @@ type providersBackend struct {
 func NewServer(c *cli.Context) (serverInterface, error) {
 	var lc net.ListenConfig
 
-	bound, err := lc.Listen(c.Context, "tcp", c.String(listenArg))
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if bound != nil {
-			bound.Close()
-		}
-	}()
-
 	mb, err := lc.Listen(c.Context, "tcp", c.String(metricsArg))
 	if err != nil {
 		return nil, err
@@ -148,6 +138,16 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 		providerSources = append(providerSources, httpSrc)
 	}
 
+	providerSources, err = checkProviderBackends(
+		c.Context,
+		providerSources,
+		config.Server.PcacheStartupMaxAttempts,
+		config.Server.PcacheStartupRetry,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	pc, err := pcache.New(
 		pcache.WithSource(providerSources...),
 		pcache.WithRefreshInterval(config.Server.PcacheRefreshInterval),
@@ -155,6 +155,18 @@ func NewServer(c *cli.Context) (serverInterface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot create provider cache: %w", err)
 	}
+
+	// The finder listener is bound after the providers backends are checked,
+	// so that its connections are refused while the check retries
+	bound, err := lc.Listen(c.Context, "tcp", c.String(listenArg))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if bound != nil {
+			bound.Close()
+		}
+	}()
 
 	indexTemplate, err := template.ParseFS(webUI, "index.html")
 	if err != nil {
